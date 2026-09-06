@@ -4,3 +4,7 @@
 .idea/
 .vscode/
 .DS_Store
+cookies*.txt
+*.cookies.txt
+/sessions/
+/notes.md

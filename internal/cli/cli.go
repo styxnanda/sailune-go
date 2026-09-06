@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,12 +28,26 @@ Commands:
   show ID       Show one bookmark
   update ID     Change personal metadata or progress
   delete ID     Permanently remove one bookmark
+  auth SITE     Import, inspect, or clear an AO3/FFN browser session
+
+Session setup (optional):
+  auth ao3 --cookies FILE    Import a Netscape cookies.txt browser export
+  auth ffn --cookies FILE    Import a FanFiction.net browser export
+  auth SITE                 Show local session status (does not verify login)
+  auth SITE --clear         Remove saved cookies
+  --sessions DIR            Global session directory override
 
 Add/update options:
   --title TEXT --author TEXT --status STATUS --chapter N
   --tags TAG1,TAG2 --notes TEXT
   Status: planned (default), reading, completed, hold, dropped
   Chapter: last chapter read, default 0; never inferred from a URL
+
+Add fetch options:
+  --no-fetch       Bookmark offline with manual metadata
+  --user-agent UA  User-Agent used for the request (or SAILUNE_USER_AGENT)
+  By default, add fetches title, authors, summary, tags, and story statistics.
+  --title and --author override fetched values when nonempty.
 
 List options:
   --query TEXT --site ao3|ffn --status STATUS --tag TAG
@@ -42,13 +57,23 @@ Use COMMAND --help for command options. Updates replace supplied fields;
 use an empty string to clear title, author, tags, or notes.
 
 Storage: --data PATH > SAILUNE_DATA > ~/.sailune/bookmarks.json
-No network requests are made; titles and authors are entered manually.
+Sessions: --sessions DIR > SAILUNE_SESSIONS > sessions/ beside the library
+Fetch failures do not save a bookmark; use --no-fetch for an offline entry.
 `
 
 func Run(args []string, out, errOut io.Writer) error {
+	return RunContext(context.Background(), args, out, errOut)
+}
+
+func RunContext(ctx context.Context, args []string, out, errOut io.Writer) error {
+	return run(ctx, args, out, errOut, nil)
+}
+
+func run(ctx context.Context, args []string, out, errOut io.Writer, fetcher sailune.MetadataFetcher) error {
 	root := flag.NewFlagSet("sailune", flag.ContinueOnError)
 	root.SetOutput(errOut)
 	path := root.String("data", "", "library JSON path")
+	sessions := root.String("sessions", "", "private session directory")
 	root.Usage = func() { fmt.Fprint(out, help) }
 	if err := root.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -63,7 +88,7 @@ func Run(args []string, out, errOut io.Writer) error {
 	}
 	command := args[0]
 	switch command {
-	case "add", "list", "show", "update", "delete":
+	case "add", "list", "show", "update", "delete", "auth":
 	default:
 		return fmt.Errorf("unknown command %q; run sailune --help", command)
 	}
@@ -72,6 +97,16 @@ func Run(args []string, out, errOut io.Writer) error {
 	jsonOutput := fs.Bool("json", false, "output JSON for scripts and future GUI clients")
 	var title, author, status, tags, notes, query, site, tag string
 	var chapter int
+	var noFetch, clearSession bool
+	var cookies, userAgent string
+	if command == "auth" {
+		fs.StringVar(&cookies, "cookies", "", "Netscape cookies.txt file exported after browser login")
+		fs.BoolVar(&clearSession, "clear", false, "remove the saved session for this site")
+	}
+	if command == "add" {
+		fs.BoolVar(&noFetch, "no-fetch", false, "save manually without a network request")
+		fs.StringVar(&userAgent, "user-agent", os.Getenv("SAILUNE_USER_AGENT"), "User-Agent for the fetch")
+	}
 	if command == "add" || command == "update" {
 		fs.StringVar(&title, "title", "", "story title (manual)")
 		fs.StringVar(&author, "author", "", "author (manual)")
@@ -93,6 +128,9 @@ func Run(args []string, out, errOut io.Writer) error {
 		}
 		if command == "list" {
 			operand = ""
+		}
+		if command == "auth" {
+			operand = " SITE"
 		}
 		fmt.Fprintf(errOut, "Usage: sailune [--data PATH] %s%s [OPTIONS]\n", command, operand)
 		fs.PrintDefaults()
@@ -129,11 +167,49 @@ func Run(args []string, out, errOut io.Writer) error {
 		*path = filepath.Join(home, ".sailune", "bookmarks.json")
 	}
 	lib := sailune.Library{Store: sailune.Store{Path: *path}}
+	if *sessions == "" {
+		*sessions = os.Getenv("SAILUNE_SESSIONS")
+	}
+	if *sessions == "" {
+		*sessions = filepath.Join(filepath.Dir(*path), "sessions")
+	}
+	sessionStore := sailune.SessionStore{Dir: *sessions}
 	var result any
 	var err error
 	switch command {
+	case "auth":
+		if cookies != "" && clearSession {
+			return errors.New("use either --cookies or --clear, not both")
+		}
+		sessionSite := sailune.Site(fs.Arg(0))
+		if sessionSite != sailune.AO3 && sessionSite != sailune.FFN {
+			return errors.New("site must be ao3 or ffn")
+		}
+		if cookies != "" {
+			f, openErr := os.Open(cookies)
+			if openErr != nil {
+				return openErr
+			}
+			defer f.Close()
+			result, err = sessionStore.Import(sessionSite, f)
+		} else {
+			if clearSession {
+				if err := sessionStore.Clear(sessionSite); err != nil {
+					return err
+				}
+			}
+			result, err = sessionStore.Status(sessionSite)
+		}
 	case "add":
-		result, err = lib.Add(sailune.Bookmark{URL: fs.Arg(0), Title: title, Author: author, Status: sailune.Status(status), Chapter: chapter, Tags: strings.Split(tags, ","), Notes: notes})
+		b := sailune.Bookmark{URL: fs.Arg(0), Title: title, Author: author, Status: sailune.Status(status), Chapter: chapter, Tags: strings.Split(tags, ","), Notes: notes}
+		if noFetch {
+			result, err = lib.Add(b)
+		} else {
+			if fetcher == nil {
+				fetcher = &sailune.Scraper{Sessions: sessionStore, UserAgent: userAgent}
+			}
+			result, err = lib.AddScraped(ctx, b, fetcher)
+		}
 	case "list":
 		result, err = lib.List(sailune.Filter{Query: query, Site: sailune.Site(site), Status: sailune.Status(status), Tag: tag})
 	case "show":
@@ -177,6 +253,8 @@ func Run(args []string, out, errOut io.Writer) error {
 		return encoder.Encode(result)
 	}
 	switch value := result.(type) {
+	case sailune.SessionStatus:
+		_, err = fmt.Fprintf(out, "Site: %s\nSession saved: %t\nUsable cookies for site root: %d\nLogin validity is checked when fetching a work.\n", value.Site, value.Configured, value.UsableCookies)
 	case []sailune.Bookmark:
 		if len(value) == 0 {
 			_, err = fmt.Fprintln(out, "No bookmarks found.")
@@ -190,6 +268,10 @@ func Run(args []string, out, errOut io.Writer) error {
 		return w.Flush()
 	case sailune.Bookmark:
 		_, err = fmt.Fprintf(out, "ID: %d\nTitle: %s\nAuthor: %s\nURL: %s\nSite: %s\nStatus: %s\nChapter: %d\nTags: %s\nNotes: %s\n", value.ID, displayTitle(value), safe(value.Author), value.URL, value.Site, value.Status, value.Chapter, safe(strings.Join(value.Tags, ", ")), safe(value.Notes))
+		if err == nil && value.Metadata != nil {
+			m := value.Metadata
+			_, err = fmt.Fprintf(out, "Summary: %s\nFandoms: %s\nLanguage: %s\nRating: %s\nWords: %d\nPublished chapters: %d\nStory complete: %t\nSource tags: %s\n", safe(m.Summary), safe(strings.Join(m.Fandoms, ", ")), safe(m.Language), safe(m.Rating), m.Words, m.Chapters, m.Complete, safe(strings.Join(m.Tags, ", ")))
+		}
 	default:
 		_, err = fmt.Fprintf(out, "Deleted bookmark %d.\n", id)
 	}

@@ -1,6 +1,7 @@
 package sailune
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -12,6 +13,50 @@ var ErrNotFound = errors.New("bookmark not found")
 var ErrDuplicate = errors.New("story already bookmarked")
 
 type Library struct{ Store Store }
+
+// MetadataFetcher lets other frontends and future site adapters share this flow.
+type MetadataFetcher interface {
+	Fetch(context.Context, string) (Metadata, error)
+}
+
+// AddScraped validates and checks duplicates before fetching. Failed fetches
+// never create bookmarks; Add rechecks duplicates under the write lock.
+func (l Library) AddScraped(ctx context.Context, b Bookmark, fetcher MetadataFetcher) (Bookmark, error) {
+	canonical, _, _, err := NormalizeURL(b.URL)
+	if err != nil {
+		return Bookmark{}, err
+	}
+	if b.Status == "" {
+		b.Status = Planned
+	}
+	if err := validate(b); err != nil {
+		return Bookmark{}, err
+	}
+	existing, err := l.List(Filter{})
+	if err != nil {
+		return Bookmark{}, err
+	}
+	for _, saved := range existing {
+		if saved.URL == canonical {
+			return Bookmark{}, fmt.Errorf("%w (ID %d)", ErrDuplicate, saved.ID)
+		}
+	}
+	if fetcher == nil {
+		return Bookmark{}, errors.New("metadata fetcher is required")
+	}
+	m, err := fetcher.Fetch(ctx, canonical)
+	if err != nil {
+		return Bookmark{}, err
+	}
+	b.Metadata = &m
+	if strings.TrimSpace(b.Title) == "" {
+		b.Title = m.Title
+	}
+	if strings.TrimSpace(b.Author) == "" {
+		b.Author = strings.Join(m.Authors, ", ")
+	}
+	return l.Add(b)
+}
 
 // Add uses URL and personal metadata; identity and timestamps are assigned here.
 func (l Library) Add(b Bookmark) (Bookmark, error) {
@@ -83,6 +128,9 @@ func (l Library) List(f Filter) ([]Bookmark, error) {
 			}
 		}
 		haystack := strings.Join([]string{b.Title, b.Author, b.URL, b.Notes, strings.Join(b.Tags, " ")}, "\n")
+		if b.Metadata != nil {
+			haystack += "\n" + strings.Join([]string{b.Metadata.Title, strings.Join(b.Metadata.Authors, " "), b.Metadata.Summary, strings.Join(b.Metadata.Fandoms, " "), strings.Join(b.Metadata.Tags, " ")}, "\n")
+		}
 		if !strings.Contains(strings.ToLower(haystack), strings.ToLower(f.Query)) {
 			continue
 		}

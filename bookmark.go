@@ -49,6 +49,26 @@ type Bookmark struct {
 	Notes     string    `json:"notes"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Metadata  *Metadata `json:"metadata,omitempty"`
+}
+
+// Metadata is a snapshot from the source site, separate from personal fields.
+// TotalChapters is zero when the author has not declared a planned total.
+type Metadata struct {
+	Title         string    `json:"title"`
+	Authors       []string  `json:"authors"`
+	Summary       string    `json:"summary"`
+	Fandoms       []string  `json:"fandoms"`
+	Tags          []string  `json:"tags"`
+	Language      string    `json:"language"`
+	Rating        string    `json:"rating"`
+	Words         int       `json:"words"`
+	Chapters      int       `json:"chapters"`
+	TotalChapters int       `json:"total_chapters"`
+	Complete      bool      `json:"complete"`
+	Published     string    `json:"published,omitempty"`
+	Updated       string    `json:"updated,omitempty"`
+	FetchedAt     time.Time `json:"fetched_at"`
 }
 
 var ao3Path = regexp.MustCompile(`^/works/([0-9]+)(?:/chapters/[0-9]+)?/?$`)
