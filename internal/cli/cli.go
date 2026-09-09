@@ -31,6 +31,10 @@ Commands:
   auth SITE     Import, inspect, or clear an AO3/FFN browser session
 
 Session setup (optional):
+  auth ao3 --login           Open default browser, sign in, then consent to import
+  auth ffn --login           Sign in through the default browser
+  auth ao3 --cookies-from-browser brave    Import directly from Brave
+  auth ffn --cookies-from-browser firefox  Import directly from Firefox
   auth ao3 --cookies FILE    Import a Netscape cookies.txt browser export
   auth ffn --cookies FILE    Import a FanFiction.net browser export
   auth SITE                 Show local session status (does not verify login)
@@ -44,6 +48,7 @@ Add/update options:
   Chapter: last chapter read, default 0; never inferred from a URL
 
 Add fetch options:
+  --cookies-from-browser BROWSER[:PROFILE]  Import this site's browser cookies
   --no-fetch       Bookmark offline with manual metadata
   --user-agent UA  User-Agent used for the request (or SAILUNE_USER_AGENT)
   By default, add fetches title, authors, summary, tags, and story statistics.
@@ -70,6 +75,10 @@ func RunContext(ctx context.Context, args []string, out, errOut io.Writer) error
 }
 
 func run(ctx context.Context, args []string, out, errOut io.Writer, fetcher sailune.MetadataFetcher) error {
+	return runWithLogin(ctx, args, out, errOut, fetcher, loginDependencies{input: os.Stdin, open: sailune.OpenLoginBrowser})
+}
+
+func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fetcher sailune.MetadataFetcher, loginDeps loginDependencies) error {
 	root := flag.NewFlagSet("sailune", flag.ContinueOnError)
 	root.SetOutput(errOut)
 	path := root.String("data", "", "library JSON path")
@@ -97,9 +106,13 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, fetcher sail
 	jsonOutput := fs.Bool("json", false, "output JSON for scripts and future GUI clients")
 	var title, author, status, tags, notes, query, site, tag string
 	var chapter int
-	var noFetch, clearSession bool
-	var cookies, userAgent string
+	var noFetch, clearSession, login bool
+	var cookies, userAgent, browserCookies string
+	if command == "auth" || command == "add" {
+		fs.StringVar(&browserCookies, "cookies-from-browser", "", "browser[:profile]: brave, chrome, chromium, edge, vivaldi, or firefox")
+	}
 	if command == "auth" {
+		fs.BoolVar(&login, "login", false, "open the default browser and ask for consent before importing cookies")
 		fs.StringVar(&cookies, "cookies", "", "Netscape cookies.txt file exported after browser login")
 		fs.BoolVar(&clearSession, "clear", false, "remove the saved session for this site")
 	}
@@ -148,6 +161,14 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, fetcher sail
 	if fs.NArg() != expected {
 		return fmt.Errorf("%s expects %d argument(s); run sailune %s --help", command, expected, command)
 	}
+	if browserCookies != "" {
+		if _, err := sailune.ParseBrowserSpec(browserCookies); err != nil {
+			return err
+		}
+		if noFetch {
+			return errors.New("--cookies-from-browser cannot be combined with --no-fetch")
+		}
+	}
 	var id int64
 	if command == "show" || command == "update" || command == "delete" {
 		var err error
@@ -178,14 +199,21 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, fetcher sail
 	var err error
 	switch command {
 	case "auth":
-		if cookies != "" && clearSession {
-			return errors.New("use either --cookies or --clear, not both")
+		if login && (cookies != "" || clearSession) {
+			return errors.New("--login cannot be combined with --cookies or --clear")
+		}
+		if (cookies != "" && clearSession) || (browserCookies != "" && (cookies != "" || clearSession)) {
+			return errors.New("use only one of --cookies, --cookies-from-browser, or --clear")
 		}
 		sessionSite := sailune.Site(fs.Arg(0))
 		if sessionSite != sailune.AO3 && sessionSite != sailune.FFN {
 			return errors.New("site must be ao3 or ffn")
 		}
-		if cookies != "" {
+		if login {
+			result, err = interactiveLogin(ctx, sessionSite, browserCookies, sessionStore, errOut, loginDeps)
+		} else if browserCookies != "" {
+			result, err = sessionStore.ImportBrowser(ctx, sessionSite, browserCookies)
+		} else if cookies != "" {
 			f, openErr := os.Open(cookies)
 			if openErr != nil {
 				return openErr
@@ -207,6 +235,9 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, fetcher sail
 		} else {
 			if fetcher == nil {
 				fetcher = &sailune.Scraper{Sessions: sessionStore, UserAgent: userAgent}
+			}
+			if browserCookies != "" {
+				fetcher = browserSessionFetcher{source: browserCookies, sessions: sessionStore, next: fetcher}
 			}
 			result, err = lib.AddScraped(ctx, b, fetcher)
 		}
@@ -276,6 +307,24 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, fetcher sail
 		_, err = fmt.Fprintf(out, "Deleted bookmark %d.\n", id)
 	}
 	return err
+}
+
+// Import only after AddScraped has checked input and duplicates.
+type browserSessionFetcher struct {
+	source   string
+	sessions sailune.SessionStore
+	next     sailune.MetadataFetcher
+}
+
+func (f browserSessionFetcher) Fetch(ctx context.Context, raw string) (sailune.Metadata, error) {
+	_, site, _, err := sailune.NormalizeURL(raw)
+	if err != nil {
+		return sailune.Metadata{}, err
+	}
+	if _, err := f.sessions.ImportBrowser(ctx, site, f.source); err != nil {
+		return sailune.Metadata{}, err
+	}
+	return f.next.Fetch(ctx, raw)
 }
 
 func displayTitle(b sailune.Bookmark) string {

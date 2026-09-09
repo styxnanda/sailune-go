@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -12,6 +13,65 @@ import (
 
 	sailune "github.com/styxnanda/sailune-go"
 )
+
+func TestBrowserCookieCLI(t *testing.T) {
+	dir := t.TempDir()
+	profile := filepath.Join(dir, "profile")
+	if err := os.MkdirAll(profile, 0700); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(profile, "cookies.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, query := range []string{
+		"CREATE TABLE moz_cookies(host TEXT,name TEXT,value TEXT,path TEXT,expiry INTEGER,isSecure INTEGER,isHttpOnly INTEGER,originAttributes TEXT)",
+		"INSERT INTO moz_cookies VALUES ('.archiveofourown.org','login','AO3_SECRET','/',0,1,1,'')",
+		"INSERT INTO moz_cookies VALUES ('.fanfiction.net','login','FFN_SECRET','/',0,1,1,'')",
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(dir, "library.json")
+	fetcher := &testFetcher{}
+	call := func(args ...string) string {
+		t.Helper()
+		var out, stderr bytes.Buffer
+		if err := run(context.Background(), append([]string{"--data", path}, args...), &out, &stderr, fetcher); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String()+stderr.String(), "SECRET") {
+			t.Fatal("browser cookie leaked to output")
+		}
+		return out.String()
+	}
+	spec := "firefox:" + profile
+	call("auth", "ao3", "--cookies-from-browser", spec, "--json")
+	call("add", "https://www.fanfiction.net/s/123/1", "--cookies-from-browser", spec, "--json")
+	if fetcher.calls != 1 {
+		t.Fatal("fetch not called after browser import")
+	}
+	if got := call("auth", "ffn", "--json"); !strings.Contains(got, `"configured": true`) {
+		t.Fatal("add did not save imported session")
+	}
+	for _, args := range [][]string{
+		{"auth", "ao3", "--cookies-from-browser", spec, "--clear"},
+		{"auth", "ao3", "--cookies-from-browser", spec, "--cookies", "missing"},
+		{"add", "https://archiveofourown.org/works/123", "--cookies-from-browser", spec, "--no-fetch"},
+	} {
+		var out, stderr bytes.Buffer
+		if err := run(context.Background(), append([]string{"--data", path}, args...), &out, &stderr, fetcher); err == nil {
+			t.Fatalf("accepted conflicting flags: %v", args)
+		}
+	}
+	var out, stderr bytes.Buffer
+	err = run(context.Background(), []string{"--data", path, "add", "https://www.fanfiction.net/s/123/1", "--cookies-from-browser", "brave:/missing/profile"}, &out, &stderr, fetcher)
+	if !errors.Is(err, sailune.ErrDuplicate) {
+		t.Fatalf("duplicate accessed browser profile: %v", err)
+	}
+}
 
 type testFetcher struct {
 	calls int

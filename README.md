@@ -58,27 +58,57 @@ sailune add 'https://archiveofourown.org/works/123456' --no-fetch \
 
 ### Authenticate to AO3 and FFN
 
-Login is optional. Sign in through your browser, export the site's cookies in
-**Netscape cookies.txt format**, and import them:
+Login is optional. Open your default browser and sign in manually:
+
+```sh
+sailune auth ao3 --login
+sailune auth ffn --login
+```
+
+Return to the terminal after signing in. Sailune asks which browser/profile you
+used, then asks you to type `yes` before it imports and saves that site's cookies.
+Press Enter without answering, type `cancel`, or press Ctrl+C to stop. No cookies
+are imported until you confirm. No extension is needed.
+
+To preselect the browser/profile for that prompt:
+
+```sh
+sailune auth ao3 --login --cookies-from-browser brave:Default
+```
+
+If already signed in, you can explicitly import without the interactive flow:
+
+```sh
+sailune auth ao3 --cookies-from-browser brave
+sailune auth ffn --cookies-from-browser firefox
+```
+
+Or import and bookmark in one command:
+
+```sh
+sailune add 'https://archiveofourown.org/works/61993375' --cookies-from-browser brave
+sailune add 'https://www.fanfiction.net/s/123456/1' --cookies-from-browser firefox
+```
+
+Supported browser names are `brave`, `chrome`, `chromium`, `edge`, `vivaldi`, and
+`firefox`. Select a profile with `brave:Default`, `"chrome:Profile 1"`, or
+`firefox:/absolute/profile/path`. If several profiles are found, specify one.
+On macOS, Chromium imports may prompt for access to the browser's Safe Storage
+item in Keychain. See the [authentication guide](docs/authentication.md) for
+profile discovery, OS support, session renewal, and troubleshooting.
+
+Netscape cookie-file imports remain available:
 
 ```sh
 sailune auth ao3 --cookies /path/to/ao3.cookies.txt
 sailune auth ffn --cookies /path/to/ffn.cookies.txt
-```
-
-Subsequent `add` commands automatically use that site's saved session. Follow the
-[authentication guide](docs/authentication.md) for separate AO3 and FFN setup
-steps, cookie export requirements, session renewal, and troubleshooting.
-
-```sh
 sailune auth ao3           # Inspect local session configuration
-sailune auth ffn --json
 sailune auth ao3 --clear   # Remove a saved session
 ```
 
-Session status reports local cookies, not verified login validity. Cookies are
-credentials: keep exports and session files private. Browser challenges may
-still prevent fetching even with an imported session.
+Subsequent adds reuse the saved session. Only the requested site's cookies are
+imported. Session status reports local cookies, not verified login validity.
+Keep session files private. Browser challenges may still prevent fetching.
 
 ### Options and output
 
@@ -92,6 +122,7 @@ still prevent fetching even with an imported session.
 | `--site` | Filter a list by `ao3` or `ffn` |
 | `--tag` | Filter a list by an exact personal tag, ignoring case |
 | `--json` | Machine-readable output; supported by every command |
+| `--cookies-from-browser` | Import the selected browser profile on `auth` or `add` |
 | `--no-fetch` | Save an offline bookmark with `add` |
 | `--user-agent` | Set the request User-Agent for `add` |
 
@@ -160,8 +191,8 @@ go test -race ./...
 go vet ./...
 ```
 
-Tests use synthetic HTML fixtures and injected HTTP transports, so no live
-account is needed. Add regression tests for parsing or session-handling changes.
+Tests use synthetic HTML, temporary browser databases, and injected HTTP
+transports, so no live account or Keychain access is needed. Add regression tests for parsing or session-handling changes.
 Keep test fixtures free of real cookies, account details, and copyrighted story
 text. Never commit cookie exports or session files.
 
@@ -173,6 +204,10 @@ problems.
 
 - [Go](https://go.dev/) and [golang.org/x/net](https://pkg.go.dev/golang.org/x/net)
   provide the runtime, HTML parser, and public suffix data.
+- [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) provides the pure-Go
+  SQLite reader for browser profiles.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) provides browser storage and cookie
+  encryption format references.
 - [AO3 / Organization for Transformative Works](https://github.com/otwcode/otwarchive)
   provides the open-source work templates used as a parser reference.
 - [FanFicFare](https://github.com/JimmXinu/FanFicFare) provides a reference for
