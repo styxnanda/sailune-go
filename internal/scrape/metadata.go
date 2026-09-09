@@ -1,4 +1,4 @@
-package sailune
+package scrape
 
 import (
 	"io"
@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"golang.org/x/net/html"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 // ParseMetadata extracts work headers only, never chapter text or HTML markup.
 // This is separately callable so adapters can be tested without live accounts.
 func ParseMetadata(site Site, r io.Reader) (Metadata, error) {
-	if _, err := siteHost(site); err != nil {
+	if _, err := model.SiteHost(site); err != nil {
 		return Metadata{}, err
 	}
 	doc, err := html.Parse(r)
@@ -84,7 +86,7 @@ func parseAO3(doc *html.Node, m Metadata) Metadata {
 			m.Tags = append(m.Tags, nodeText(n))
 		}
 	}
-	m.Authors, m.Fandoms, m.Tags = cleanTags(m.Authors), cleanTags(m.Fandoms), cleanTags(m.Tags)
+	m.Authors, m.Fandoms, m.Tags = model.CleanTags(m.Authors), model.CleanTags(m.Fandoms), model.CleanTags(m.Tags)
 	return m
 }
 
@@ -162,7 +164,7 @@ func parseFFN(doc *html.Node, m Metadata) Metadata {
 			m.Fandoms = append(m.Fandoms, nodeText(n))
 		}
 	}
-	m.Authors, m.Fandoms = cleanTags(m.Authors), cleanTags(m.Fandoms)
+	m.Authors, m.Fandoms = model.CleanTags(m.Authors), model.CleanTags(m.Fandoms)
 	return m
 }
 

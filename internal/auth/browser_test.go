@@ -1,4 +1,4 @@
-package sailune
+package auth
 
 import (
 	"bytes"
@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 func browserFixture(t *testing.T, browser string, version int) (string, *sql.DB) {
@@ -81,7 +83,7 @@ func TestFirefoxBrowserImportBothSites(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			host, _ := siteHost(site)
+			host, _ := model.SiteHost(site)
 			cookies := jar.Cookies(&url.URL{Scheme: "https", Host: host, Path: "/"})
 			if len(cookies) != 1 || cookies[0].Value != "TEST_SESSION" {
 				t.Fatal("imported login unavailable")
@@ -107,7 +109,7 @@ func TestChromiumFiltersBeforeDecryption(t *testing.T) {
 		calls := 0
 		jar, err := readBrowserCookies(context.Background(), site, "brave", profile, func(host string, value []byte, version int) (string, error) {
 			calls++
-			if !siteDomain(site, host) || version != 24 || string(value) != "v10encrypted" {
+			if !model.SiteDomain(site, host) || version != 24 || string(value) != "v10encrypted" {
 				t.Fatal("unexpected cookie decrypted")
 			}
 			return "DECRYPTED", nil

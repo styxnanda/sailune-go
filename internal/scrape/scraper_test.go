@@ -1,12 +1,15 @@
-package sailune
+package scrape
 
 import (
 	"context"
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -22,7 +25,7 @@ func TestScraperGuestAndAuthenticatedBothSites(t *testing.T) {
 		for _, authenticated := range []bool{false, true} {
 			t.Run(string(site)+map[bool]string{false: "/guest", true: "/authenticated"}[authenticated], func(t *testing.T) {
 				sessions := SessionStore{Dir: t.TempDir()}
-				host, _ := siteHost(site)
+				host, _ := model.SiteHost(site)
 				if authenticated {
 					if _, err := sessions.Import(site, strings.NewReader(cookieExport(host, "session", "TEST_LOGIN"))); err != nil {
 						t.Fatal(err)
@@ -66,14 +69,15 @@ func TestScraperGuestAndAuthenticatedBothSites(t *testing.T) {
 					t.Fatalf("session state: %+v %v", status, err)
 				}
 				if authenticated {
-					path, _ := sessions.path(site)
-					j, _, err := loadSession(path, site)
+					err := sessions.WithJar(site, func(j http.CookieJar) error {
+						cookies := j.Cookies(&url.URL{Scheme: "https", Host: host, Path: "/"})
+						if len(cookies) != 1 || cookies[0].Value != "ROTATED" {
+							t.Fatal("response cookie not persisted")
+						}
+						return nil
+					})
 					if err != nil {
 						t.Fatal(err)
-					}
-					cookies := j.snapshot()
-					if len(cookies) != 1 || cookies[0].Cookie.Value != "ROTATED" {
-						t.Fatal("response cookie not persisted")
 					}
 				}
 			})
@@ -150,4 +154,8 @@ func TestScraperRedirectIsolationAndCancellation(t *testing.T) {
 	if _, err := s.Fetch(ctx, "https://archiveofourown.org/works/123"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
 	}
+}
+
+func cookieExport(domain, name, value string) string {
+	return "# Netscape HTTP Cookie File\n#HttpOnly_" + domain + "\tTRUE\t/\tTRUE\t0\t" + name + "\t" + value + "\n"
 }

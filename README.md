@@ -182,6 +182,24 @@ go build -o bin/sailune ./cmd/sailune
 You can also run commands with `go run ./cmd/sailune`. Use `--data` and
 `--sessions` pointing to temporary paths when testing against a separate library.
 
+### Project layout
+
+```text
+cmd/sailune/             CLI executable entry point
+internal/cli/            Commands, output, and interactive login prompts
+internal/model/          Bookmark types, validation, and site URL rules
+internal/library/        Bookmark operations and JSON storage
+internal/auth/           Sessions, browser cookies, encryption, and browser launch
+internal/scrape/         HTTP fetching and site metadata parsers
+internal/scrape/testdata/ Synthetic HTML fixtures
+tests/                  Public Go API compatibility tests
+docs/                   Authentication guide
+sailune.go              Public Go API
+```
+
+Tests live beside the implementation they exercise. External Go callers import
+`github.com/styxnanda/sailune-go`; implementation packages remain internal.
+
 ### Validate changes
 
 ```sh

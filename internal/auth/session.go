@@ -1,4 +1,4 @@
-package sailune
+package auth
 
 import (
 	"bufio"
@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"golang.org/x/net/publicsuffix"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 // SessionStore keeps imported browser sessions outside the bookmark database.
@@ -39,30 +41,8 @@ type sessionFile struct {
 	Cookies []savedCookie `json:"cookies"`
 }
 
-func siteHost(site Site) (string, error) {
-	switch site {
-	case AO3:
-		return "archiveofourown.org", nil
-	case FFN:
-		return "www.fanfiction.net", nil
-	default:
-		return "", errors.New("site must be ao3 or ffn")
-	}
-}
-
-func siteDomain(site Site, domain string) bool {
-	domain = strings.TrimPrefix(strings.ToLower(domain), ".")
-	switch site {
-	case AO3:
-		return domain == "archiveofourown.org" || domain == "www.archiveofourown.org"
-	case FFN:
-		return domain == "fanfiction.net" || domain == "www.fanfiction.net" || domain == "m.fanfiction.net"
-	}
-	return false
-}
-
 func (s SessionStore) path(site Site) (string, error) {
-	if _, err := siteHost(site); err != nil {
+	if _, err := model.SiteHost(site); err != nil {
 		return "", err
 	}
 	if s.Dir == "" {
@@ -74,7 +54,7 @@ func (s SessionStore) path(site Site) (string, error) {
 // Import reads a Netscape cookies.txt export, retaining only the requested site.
 // A valid import replaces the site's previous session; bad imports leave it intact.
 func (s SessionStore) Import(site Site, r io.Reader) (SessionStatus, error) {
-	if _, err := siteHost(site); err != nil {
+	if _, err := model.SiteHost(site); err != nil {
 		return SessionStatus{}, err
 	}
 	j := newSessionJar(site)
@@ -99,7 +79,7 @@ func (s SessionStore) Import(site Site, r io.Reader) (SessionStatus, error) {
 		if len(parts) != 7 {
 			return SessionStatus{}, fmt.Errorf("invalid Netscape cookie format at line %d (expected 7 tab-separated fields)", line)
 		}
-		if !siteDomain(site, parts[0]) {
+		if !model.SiteDomain(site, parts[0]) {
 			continue
 		}
 		expires, err := strconv.ParseInt(parts[4], 10, 64)
@@ -141,7 +121,7 @@ func (s SessionStore) Status(site Site) (SessionStatus, error) {
 	if err != nil {
 		return SessionStatus{}, err
 	}
-	host, _ := siteHost(site)
+	host, _ := model.SiteHost(site)
 	return SessionStatus{Site: site, Configured: configured, UsableCookies: len(j.Cookies(&url.URL{Scheme: "https", Host: host, Path: "/"}))}, nil
 }
 
@@ -155,9 +135,9 @@ func (s SessionStore) Clear(site Site) error {
 	})
 }
 
-// Hold a per-site lock across load/fetch/save so cookie rotation cannot race an
+// WithJar holds a per-site lock across load/fetch/save so cookie rotation cannot race an
 // import, clear, or another fetch. No bookmark lock is held during network I/O.
-func (s SessionStore) withJar(site Site, fn func(http.CookieJar) error) error {
+func (s SessionStore) WithJar(site Site, fn func(http.CookieJar) error) error {
 	if s.Dir == "" {
 		return fn(newSessionJar(site))
 	}
@@ -213,7 +193,7 @@ func loadSession(path string, site Site) (*sessionJar, bool, error) {
 	}
 	for _, c := range saved.Cookies {
 		u, err := url.Parse(c.Origin)
-		if err != nil || u.Scheme != "https" || u.User != nil || !siteDomain(site, u.Host) || c.Cookie.Valid() != nil || (c.Cookie.Domain != "" && !siteDomain(site, c.Cookie.Domain)) {
+		if err != nil || u.Scheme != "https" || u.User != nil || !model.SiteDomain(site, u.Host) || c.Cookie.Valid() != nil || (c.Cookie.Domain != "" && !model.SiteDomain(site, c.Cookie.Domain)) {
 			return nil, false, errors.New("invalid session cookie; re-import cookies with auth")
 		}
 		j.SetCookies(u, []*http.Cookie{&c.Cookie})
@@ -261,7 +241,7 @@ func newSessionJar(site Site) *sessionJar {
 }
 
 func (j *sessionJar) Cookies(u *url.URL) []*http.Cookie {
-	if u.Scheme != "https" || !siteDomain(j.site, u.Host) {
+	if u.Scheme != "https" || !model.SiteDomain(j.site, u.Host) {
 		return nil
 	}
 	return j.jar.Cookies(u)
@@ -270,7 +250,7 @@ func (j *sessionJar) Cookies(u *url.URL) []*http.Cookie {
 func (j *sessionJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if u.Scheme != "https" || !siteDomain(j.site, u.Host) {
+	if u.Scheme != "https" || !model.SiteDomain(j.site, u.Host) {
 		return
 	}
 	for _, original := range cookies {
@@ -279,7 +259,7 @@ func (j *sessionJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 		if domain == "" {
 			domain = u.Hostname()
 		}
-		if !siteDomain(j.site, domain) || (u.Hostname() != domain && !strings.HasSuffix(u.Hostname(), "."+domain)) || c.Valid() != nil {
+		if !model.SiteDomain(j.site, domain) || (u.Hostname() != domain && !strings.HasSuffix(u.Hostname(), "."+domain)) || c.Valid() != nil {
 			continue
 		}
 		if !strings.HasPrefix(c.Path, "/") {

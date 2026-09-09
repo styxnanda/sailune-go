@@ -1,4 +1,4 @@
-package sailune
+package library
 
 import (
 	"encoding/json"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 // Store serializes mutations across processes and replaces the data atomically.
@@ -40,8 +42,8 @@ func (s Store) read() (database, error) {
 	}
 	ids, urls := map[int64]bool{}, map[string]bool{}
 	for _, b := range saved.Bookmarks {
-		u, site, work, err := NormalizeURL(b.URL)
-		if err != nil || u != b.URL || site != b.Site || work != b.WorkID || b.ID < 1 || b.ID >= saved.NextID || ids[b.ID] || urls[b.URL] || validate(b) != nil {
+		u, site, work, err := model.NormalizeURL(b.URL)
+		if err != nil || u != b.URL || site != b.Site || work != b.WorkID || b.ID < 1 || b.ID >= saved.NextID || ids[b.ID] || urls[b.URL] || model.Validate(b) != nil {
 			return db, errors.New("invalid library record (file left untouched)")
 		}
 		ids[b.ID], urls[b.URL] = true, true

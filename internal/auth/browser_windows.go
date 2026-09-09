@@ -1,10 +1,11 @@
 //go:build windows
 
-package sailune
+package auth
 
 import (
-	"golang.org/x/sys/windows"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func unprotectWindows(encrypted []byte) ([]byte, error) {

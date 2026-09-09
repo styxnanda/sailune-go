@@ -1,4 +1,4 @@
-package sailune
+package scrape
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 var (
@@ -28,14 +30,14 @@ type Scraper struct {
 }
 
 func (s *Scraper) Fetch(ctx context.Context, raw string) (Metadata, error) {
-	canonical, site, _, err := NormalizeURL(raw)
+	canonical, site, _, err := model.NormalizeURL(raw)
 	if err != nil {
 		return Metadata{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var result Metadata
-	err = s.Sessions.withJar(site, func(jar http.CookieJar) error {
+	err = s.Sessions.WithJar(site, func(jar http.CookieJar) error {
 		client := http.Client{}
 		if s.Client != nil {
 			client = *s.Client
@@ -48,7 +50,7 @@ func (s *Scraper) Fetch(ctx context.Context, raw string) (Metadata, error) {
 			if len(via) >= 5 {
 				return errors.New("too many site redirects")
 			}
-			if req.URL.Scheme != "https" || req.URL.User != nil || !siteDomain(site, req.URL.Host) {
+			if req.URL.Scheme != "https" || req.URL.User != nil || !model.SiteDomain(site, req.URL.Host) {
 				return errors.New("refused redirect outside the site's HTTPS hosts")
 			}
 			return nil
@@ -93,7 +95,7 @@ func (s *Scraper) Fetch(ctx context.Context, raw string) (Metadata, error) {
 		if strings.Contains(resp.Request.URL.Path, "login") {
 			return ErrLoginRequired
 		}
-		if redirected, _, _, err := NormalizeURL(resp.Request.URL.String()); err == nil && redirected != canonical {
+		if redirected, _, _, err := model.NormalizeURL(resp.Request.URL.String()); err == nil && redirected != canonical {
 			return errors.New("site redirected to a different work; add that work's URL explicitly")
 		}
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))

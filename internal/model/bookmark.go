@@ -1,5 +1,5 @@
-// Package sailune manages a local fanfiction library independently of its CLI.
-package sailune
+// Package model defines bookmarks, source metadata, and supported site identities.
+package model
 
 import (
 	"errors"
@@ -102,7 +102,7 @@ func NormalizeURL(raw string) (canonical string, site Site, workID string, err e
 	return canonical, site, workID, nil
 }
 
-func cleanTags(tags []string) []string {
+func CleanTags(tags []string) []string {
 	result := []string{}
 	seen := map[string]bool{}
 	for _, tag := range tags {
@@ -116,7 +116,7 @@ func cleanTags(tags []string) []string {
 	return result
 }
 
-func validate(b Bookmark) error {
+func Validate(b Bookmark) error {
 	if !b.Status.Valid() {
 		return fmt.Errorf("invalid status %q: use planned, reading, completed, hold, or dropped", b.Status)
 	}

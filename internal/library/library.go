@@ -1,4 +1,4 @@
-package sailune
+package library
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 var ErrNotFound = errors.New("bookmark not found")
@@ -22,14 +24,14 @@ type MetadataFetcher interface {
 // AddScraped validates and checks duplicates before fetching. Failed fetches
 // never create bookmarks; Add rechecks duplicates under the write lock.
 func (l Library) AddScraped(ctx context.Context, b Bookmark, fetcher MetadataFetcher) (Bookmark, error) {
-	canonical, _, _, err := NormalizeURL(b.URL)
+	canonical, _, _, err := model.NormalizeURL(b.URL)
 	if err != nil {
 		return Bookmark{}, err
 	}
 	if b.Status == "" {
 		b.Status = Planned
 	}
-	if err := validate(b); err != nil {
+	if err := model.Validate(b); err != nil {
 		return Bookmark{}, err
 	}
 	existing, err := l.List(Filter{})
@@ -61,7 +63,7 @@ func (l Library) AddScraped(ctx context.Context, b Bookmark, fetcher MetadataFet
 // Add uses URL and personal metadata; identity and timestamps are assigned here.
 func (l Library) Add(b Bookmark) (Bookmark, error) {
 	var err error
-	b.URL, b.Site, b.WorkID, err = NormalizeURL(b.URL)
+	b.URL, b.Site, b.WorkID, err = model.NormalizeURL(b.URL)
 	if err != nil {
 		return Bookmark{}, err
 	}
@@ -69,8 +71,8 @@ func (l Library) Add(b Bookmark) (Bookmark, error) {
 		b.Status = Planned
 	}
 	b.Title, b.Author = strings.TrimSpace(b.Title), strings.TrimSpace(b.Author)
-	b.Tags = cleanTags(b.Tags)
-	if err := validate(b); err != nil {
+	b.Tags = model.CleanTags(b.Tags)
+	if err := model.Validate(b); err != nil {
 		return Bookmark{}, err
 	}
 	err = l.Store.change(func(db *database) error {
@@ -182,12 +184,12 @@ func (l Library) Update(id int64, p Patch) (Bookmark, error) {
 				b.Chapter = *p.Chapter
 			}
 			if p.Tags != nil {
-				b.Tags = cleanTags(*p.Tags)
+				b.Tags = model.CleanTags(*p.Tags)
 			}
 			if p.Notes != nil {
 				b.Notes = *p.Notes
 			}
-			if err := validate(b); err != nil {
+			if err := model.Validate(b); err != nil {
 				return err
 			}
 			b.UpdatedAt = time.Now().UTC()

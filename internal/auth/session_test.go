@@ -1,4 +1,4 @@
-package sailune
+package auth
 
 import (
 	"net/http"
@@ -73,7 +73,7 @@ func TestCookieRotationAndMatching(t *testing.T) {
 	if _, err := store.Import(AO3, strings.NewReader(input)); err != nil {
 		t.Fatal(err)
 	}
-	err := store.withJar(AO3, func(jar http.CookieJar) error {
+	err := store.WithJar(AO3, func(jar http.CookieJar) error {
 		u, _ := url.Parse("https://archiveofourown.org/works/1")
 		if len(jar.Cookies(u)) != 2 {
 			t.Fatal("cookies not sent to matching path")

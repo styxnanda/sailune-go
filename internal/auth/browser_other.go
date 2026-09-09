@@ -1,5 +1,5 @@
 //go:build !windows
 
-package sailune
+package auth
 
 func unprotectWindows(encrypted []byte) ([]byte, error) { return nil, errCookieDecrypt }

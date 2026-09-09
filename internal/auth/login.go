@@ -1,4 +1,4 @@
-package sailune
+package auth
 
 import (
 	"context"
@@ -6,11 +6,13 @@ import (
 	"os/exec"
 	"runtime"
 	"time"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 // LoginURL opens the official site, where the user controls the sign-in flow.
 func LoginURL(site Site) (string, error) {
-	host, err := siteHost(site)
+	host, err := model.SiteHost(site)
 	if err != nil {
 		return "", err
 	}

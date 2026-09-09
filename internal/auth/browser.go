@@ -1,4 +1,4 @@
-package sailune
+package auth
 
 import (
 	"context"
@@ -15,6 +15,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/styxnanda/sailune-go/internal/model"
 )
 
 // BrowserSpec selects a browser and optionally a profile name or directory.
@@ -38,7 +40,7 @@ func ParseBrowserSpec(value string) (BrowserSpec, error) {
 // ImportBrowser reads only cookies belonging to site. It never logs cookie
 // values or changes browser cookies. A failed read leaves saved sessions intact.
 func (s SessionStore) ImportBrowser(ctx context.Context, site Site, value string) (SessionStatus, error) {
-	if _, err := siteHost(site); err != nil {
+	if _, err := model.SiteHost(site); err != nil {
 		return SessionStatus{}, err
 	}
 	spec, err := ParseBrowserSpec(value)
@@ -244,7 +246,7 @@ func readBrowserCookies(ctx context.Context, site Site, browser, profile string,
 		if err := rows.Scan(&host, &name, &value, &encrypted, &path, &expiry, &secure, &httpOnly); err != nil {
 			return nil, browserDBError()
 		}
-		if !siteDomain(site, host) {
+		if !model.SiteDomain(site, host) {
 			continue
 		}
 		var expires time.Time

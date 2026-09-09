@@ -1,4 +1,4 @@
-package sailune
+package scrape
 
 import (
 	"errors"

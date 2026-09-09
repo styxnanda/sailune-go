@@ -1,4 +1,4 @@
-package sailune
+package model
 
 import "testing"
 

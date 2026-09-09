@@ -1,10 +1,12 @@
-package sailune
+package library
 
 import (
 	"context"
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/styxnanda/sailune-go/internal/scrape"
 )
 
 type fetchFunc func(context.Context, string) (Metadata, error)
@@ -32,8 +34,8 @@ func TestAddScrapedPreservesPersonalFieldsAndRejectsFailure(t *testing.T) {
 		t.Fatal("invalid bookmark fetched")
 	}
 	before, _ := os.ReadFile(l.Store.Path)
-	fail := fetchFunc(func(context.Context, string) (Metadata, error) { return Metadata{}, ErrLoginRequired })
-	if _, err := l.AddScraped(context.Background(), Bookmark{URL: "https://archiveofourown.org/works/2"}, fail); !errors.Is(err, ErrLoginRequired) {
+	fail := fetchFunc(func(context.Context, string) (Metadata, error) { return Metadata{}, scrape.ErrLoginRequired })
+	if _, err := l.AddScraped(context.Background(), Bookmark{URL: "https://archiveofourown.org/works/2"}, fail); !errors.Is(err, scrape.ErrLoginRequired) {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(l.Store.Path)
