@@ -40,6 +40,7 @@ Session setup (optional):
   auth ffn --cookies FILE    Import a FanFiction.net browser export
   auth SITE                 Show local session status (does not verify login)
   auth SITE --clear         Remove saved cookies
+  auth SITE --migrate-from DIR  Encrypt and move a legacy session
   --sessions DIR            Global session directory override
 
 Add/update options:
@@ -63,7 +64,7 @@ Use COMMAND --help for command options. Updates replace supplied fields;
 use an empty string to clear title, author, tags, or notes.
 
 Storage: --data PATH > SAILUNE_DATA > ~/.sailune/bookmarks.json
-Sessions: --sessions DIR > SAILUNE_SESSIONS > sessions/ beside the library
+Sessions: --sessions DIR > SAILUNE_SESSIONS > OS-local Sailune session directory
 Fetch failures do not save a bookmark; use --no-fetch for an offline entry.
 `
 
@@ -108,11 +109,12 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	var title, author, status, tags, notes, query, site, tag string
 	var chapter int
 	var noFetch, clearSession, login bool
-	var cookies, userAgent, browserCookies string
+	var cookies, userAgent, browserCookies, migrateFrom string
 	if command == "auth" || command == "add" || command == "refresh" {
 		fs.StringVar(&browserCookies, "cookies-from-browser", "", "family/browser[:profile]: chromium/brave|chrome|chromium|edge|opera|vivaldi, gecko/firefox; legacy names accepted")
 	}
 	if command == "auth" {
+		fs.StringVar(&migrateFrom, "migrate-from", "", "encrypt and move an existing session from this directory")
 		fs.BoolVar(&login, "login", false, "open the default browser and ask for consent before importing cookies")
 		fs.StringVar(&cookies, "cookies", "", "Netscape cookies.txt file exported after browser login")
 		fs.BoolVar(&clearSession, "clear", false, "remove the saved session for this site")
@@ -191,17 +193,46 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		*path = filepath.Join(home, ".sailune", "bookmarks.json")
 	}
 	lib := sailune.Library{Store: sailune.Store{Path: *path}}
+	defaultSessions := *sessions == "" && os.Getenv("SAILUNE_SESSIONS") == ""
 	if *sessions == "" {
 		*sessions = os.Getenv("SAILUNE_SESSIONS")
 	}
 	if *sessions == "" {
-		*sessions = filepath.Join(filepath.Dir(*path), "sessions")
+		var err error
+		*sessions, err = sailune.DefaultSessionDir()
+		if err != nil {
+			return err
+		}
 	}
 	sessionStore := sailune.SessionStore{Dir: *sessions}
+	// Surface legacy credentials instead of silently fetching as a guest after
+	// the default session location changes. Offline commands never inspect them.
+	if defaultSessions && migrateFrom == "" && (command == "auth" || command == "add" && !noFetch || command == "refresh") {
+		var targetSite sailune.Site
+		if command == "auth" {
+			targetSite = sailune.Site(fs.Arg(0))
+		}
+		if command == "add" {
+			_, targetSite, _, _ = sailune.NormalizeURL(fs.Arg(0))
+		}
+		if command == "refresh" {
+			if b, e := lib.Get(id); e == nil {
+				targetSite = b.Site
+			}
+		}
+		if targetSite == sailune.AO3 || targetSite == sailune.FFN {
+			if legacy := legacySessionDir(*path, *sessions, targetSite); legacy != "" {
+				return fmt.Errorf("legacy session found in %s; run auth %s --migrate-from %q to encrypt and move it", legacy, targetSite, legacy)
+			}
+		}
+	}
 	var result any
 	var err error
 	switch command {
 	case "auth":
+		if migrateFrom != "" && (login || cookies != "" || browserCookies != "" || clearSession) {
+			return errors.New("--migrate-from cannot be combined with login, import, or clear options")
+		}
 		if login && (cookies != "" || clearSession) {
 			return errors.New("--login cannot be combined with --cookies or --clear")
 		}
@@ -212,7 +243,9 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		if sessionSite != sailune.AO3 && sessionSite != sailune.FFN {
 			return errors.New("site must be ao3 or ffn")
 		}
-		if login {
+		if migrateFrom != "" {
+			result, err = sessionStore.Migrate(sessionSite, migrateFrom)
+		} else if login {
 			result, err = interactiveLogin(ctx, sessionSite, browserCookies, sessionStore, errOut, loginDeps)
 		} else if browserCookies != "" {
 			result, err = sessionStore.ImportBrowser(ctx, sessionSite, browserCookies)
@@ -389,4 +422,30 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 		}
 	}
 	return fs.Parse(append(append(options, "--"), operands...))
+}
+
+func legacySessionDir(dataPath, destination string, site sailune.Site) string {
+	target, err := filepath.Abs(filepath.Join(destination, string(site)+".json"))
+	if err != nil {
+		return ""
+	}
+	if _, err := os.Stat(target); err == nil {
+		return ""
+	}
+	roots := []string{filepath.Join(filepath.Dir(dataPath), "sessions")}
+	// Explicit session overrides are useful for isolated libraries and tests.
+	if os.Getenv("SAILUNE_SESSIONS") == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			roots = append(roots, filepath.Join(home, ".sailune/sessions"))
+		}
+	}
+	for _, root := range roots {
+		source, err := filepath.Abs(filepath.Join(root, string(site)+".json"))
+		if err == nil && source != target {
+			if info, err := os.Stat(source); err == nil && info.Mode().IsRegular() {
+				return root
+			}
+		}
+	}
+	return ""
 }

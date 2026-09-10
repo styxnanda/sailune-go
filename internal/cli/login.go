@@ -66,7 +66,7 @@ func interactiveLogin(ctx context.Context, site sailune.Site, source string, sto
 	if _, err := sailune.ParseBrowserSpec(source); err != nil {
 		return sailune.SessionStatus{}, err
 	}
-	if _, err := fmt.Fprintf(out, "Import and save only %s cookies from %s in %s?\nThis replaces any saved %s session. Cookies can grant account access and are stored locally without encryption.\nType yes after signing in to consent, or press Enter to cancel: ", site, source, store.Dir, site); err != nil {
+	if _, err := fmt.Fprintf(out, "Import and save only %s cookies from %s in %s?\nThis replaces any saved %s session. Cookies can grant account access and are encrypted locally with a key held in the OS credential store.\nType yes after signing in to consent, or press Enter to cancel: ", site, source, store.Dir, site); err != nil {
 		return sailune.SessionStatus{}, err
 	}
 	answer, err := loginLine(ctx, input)

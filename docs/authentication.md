@@ -217,9 +217,9 @@ sailune auth ffn --json
 
 `configured` means a session file exists. `usable_cookies` counts unexpired
 cookies matching the site's HTTPS root. It does not count only login cookies,
-and it does not prove that the server still accepts the login. Adding a work is
-the access check; use a URL that is not already bookmarked because duplicates
-are rejected before fetching.
+and it does not prove that the server still accepts the login. `add URL` or
+`refresh ID` tests access to a work. Success on a public work does not prove
+that restricted works are accessible.
 
 When a session expires, sign in again in your browser and rerun
 `auth SITE --cookies-from-browser BROWSER`. For cookie-file imports, export
@@ -243,23 +243,83 @@ The importer copies cookies into its session store. The original export is no
 longer needed after a successful import and can be removed from your private
 export directory.
 
-## Session location
+## Session location and encryption
 
-By default, sessions are stored in `~/.sailune/sessions/`, separately from the
-bookmark library. To use another directory, pass the same global option to both
-setup and subsequent commands:
+Session files use AES-256-GCM authenticated encryption with a random 256-bit key
+per session file and a fresh random nonce on every save. Authentication binds
+the encrypted data to the site and key ID. Cookie values, names, domains, paths,
+and expiry dates are encrypted. Chunking or scrambling is not a substitute for
+encryption. Files and temporary files use private permissions on POSIX systems;
+plaintext cookies are not written to temporary files.
+
+Keys are kept separately in macOS Keychain, Windows Credential Manager with
+local-machine persistence, or the Linux login collection of a Secret Service
+provider. Linux requires a running, unlocked Secret Service; a headless system
+without one cannot save authenticated sessions. There is no plaintext fallback
+when the credential store is locked, unavailable, or access is denied. Guest
+fetches and offline bookmark commands do not need a credential-store key.
+
+Default locations are independent of the bookmark file:
+
+| Platform | Encrypted session directory |
+| --- | --- |
+| macOS | `~/Library/Application Support/Sailune/sessions/` |
+| Windows | `%LOCALAPPDATA%\Sailune\sessions\` |
+| Linux | `$XDG_STATE_HOME/sailune/sessions/`, or `~/.local/state/sailune/sessions/` |
+
+Override with `--sessions DIR` or `SAILUNE_SESSIONS`, in that order. Keep this
+directory local; Sailune cannot reliably detect every cloud-sync client or
+network mount. `--data` can point to a synced bookmark file without moving
+sessions. Bookmark files and exports contain no cookies or encryption keys.
+Copying the session file alone to another device will not transfer its key;
+authenticate separately on each device. Full OS backups, credential-store
+exports, and software running as your OS account require their own protection.
+Encryption does not protect against malware controlling the unlocked account.
+
+### Migrate existing plaintext sessions
+
+For the old default location:
 
 ```sh
-sailune --sessions /private/path/sessions auth ao3 --cookies /path/to/ao3.cookies.txt
-sailune --sessions /private/path/sessions add 'https://archiveofourown.org/works/WORK_ID'
+sailune auth ao3 --migrate-from "$HOME/.sailune/sessions"
+sailune auth ffn --migrate-from "$HOME/.sailune/sessions"
 ```
 
-Alternatively set `SAILUNE_SESSIONS`. Precedence is `--sessions`, then
-`SAILUNE_SESSIONS`, then `sessions/` beside the library file. A custom `--data`
-path changes that default unless you explicitly set a session directory.
+Run only for sites you configured. If you previously used a custom data folder,
+use its old `sessions` directory instead. Migration validates the old session,
+writes and verifies the encrypted destination, then removes the original file.
+It refuses to overwrite a different destination session. To encrypt in place
+in an explicitly chosen local directory, use the same directory for `--sessions`
+and `--migrate-from`. Regular fetching refuses legacy plaintext files until they
+are migrated or cleared. Encryption failures leave the source untouched.
 
-Session files use private permissions on POSIX systems but are not encrypted.
-Cookie values are excluded from command output and bookmark exports.
+Migration cannot remove old copies from cloud version history, backups, or other
+devices. If credentials were synced, remove those copies and use the site's
+session-revocation controls where available. Clearing Sailune's local session
+alone does not revoke a browser/server session.
+
+### Password prompts and renewal
+
+Opening a browser and signing in does not grant Sailune permission to decrypt
+the browser's cookie database. Chromium imports may still request Keychain or
+credential-store approval. Sailune does not change browser access controls,
+cache the browser's master key on disk, or suppress required OS prompts.
+[Apple documents how Keychain access permission works](https://support.apple.com/guide/mac-help/allow-apps-to-access-your-keychain-kychn002/mac).
+
+Import once, then use `add` and `refresh` without `--cookies-from-browser`.
+These commands reuse Sailune's encrypted session and do not read the browser's
+master key again. Unlocking Sailune's own credential-store key may still require
+OS interaction. `list`, `show`, and personal `update` remain offline.
+
+Cookies with `Expires` or `Max-Age` stop being used when they expire. Session
+cookies without an expiry are retained, but the site can invalidate them at any
+time. Real `add`/`refresh` requests automatically persist any replacement cookies
+or deletions issued by the server. Sailune never extends expiry timestamps
+locally and does not send background keep-alive requests merely because you use
+the CLI. Session expiry and renewal remain server-controlled, as described by
+[OWASP's session management guidance](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+A status/health check cannot renew a revoked session; sign in and import again
+when the site requires it.
 
 ## Troubleshooting
 

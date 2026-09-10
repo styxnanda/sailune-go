@@ -256,3 +256,52 @@ func TestRefreshCommand(t *testing.T) {
 		t.Fatal("invalid refresh fetched")
 	}
 }
+
+func TestLegacyMigrationCLIAndOfflineIsolation(t *testing.T) {
+	dir := t.TempDir()
+	data := filepath.Join(dir, "bookmarks.json")
+	source := filepath.Join(dir, "sessions")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("SAILUNE_SESSIONS", "")
+	if err := os.MkdirAll(source, 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":1,"cookies":[{"origin":"https://archiveofourown.org/","cookie":{"Name":"session","Value":"SYNTHETIC_SECRET","Path":"/","Secure":true}}]}`
+	if err := os.WriteFile(filepath.Join(source, "ao3.json"), []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	call := func(args ...string) error {
+		out.Reset()
+		stderr.Reset()
+		return Run(append([]string{"--data", data}, args...), &out, &stderr)
+	}
+	if err := call("list"); err != nil {
+		t.Fatalf("offline list inspected credentials: %v", err)
+	}
+	if err := call("auth", "ao3"); err == nil || !strings.Contains(err.Error(), "--migrate-from") {
+		t.Fatalf("missing migration hint: %v", err)
+	}
+	for _, option := range []string{"--login", "--clear"} {
+		if err := call("auth", "ao3", "--migrate-from", source, option); err == nil {
+			t.Fatal("accepted conflicting migration")
+		}
+	}
+	if err := call("auth", "ao3", "--migrate-from", source, "--json"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String()+stderr.String(), "SYNTHETIC_SECRET") || !strings.Contains(out.String(), `"configured": true`) {
+		t.Fatal("bad migration output")
+	}
+	if _, err := os.Stat(filepath.Join(source, "ao3.json")); !os.IsNotExist(err) {
+		t.Fatal("plaintext source remains")
+	}
+	if err := call("auth", "ao3", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(data); !os.IsNotExist(err) {
+		t.Fatal("migration changed bookmark library")
+	}
+}

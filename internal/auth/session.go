@@ -22,7 +22,7 @@ import (
 )
 
 // SessionStore keeps imported browser sessions outside the bookmark database.
-// Cookies are credentials: files are private, and status never returns values.
+// Cookies are encrypted with OS-held keys; status never returns values.
 type SessionStore struct{ Dir string }
 
 type SessionStatus struct {
@@ -186,10 +186,23 @@ func loadSession(path string, site Site) (*sessionJar, bool, error) {
 		return nil, false, err
 	}
 	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxEncryptedSession+1))
+	if err != nil {
+		return nil, false, err
+	}
+	plain, err := openSession(data, site)
+	if err != nil {
+		return nil, false, err
+	}
+	defer clear(plain)
+	return decodeSession(plain, site)
+}
+
+func decodeSession(data []byte, site Site) (*sessionJar, bool, error) {
+	j := newSessionJar(site)
 	var saved sessionFile
-	data, err := io.ReadAll(io.LimitReader(f, 4<<20+1))
-	if err != nil || len(data) > 4<<20 || json.Unmarshal(data, &saved) != nil || saved.Version != 1 || saved.Cookies == nil {
-		return nil, false, errors.New("invalid session file; re-import cookies with auth (file left untouched)")
+	if len(data) > 4<<20 || json.Unmarshal(data, &saved) != nil || saved.Version != 1 || saved.Cookies == nil {
+		return nil, false, errors.New("invalid session data; re-import cookies with auth (file left untouched)")
 	}
 	for _, c := range saved.Cookies {
 		u, err := url.Parse(c.Origin)
@@ -208,6 +221,11 @@ func writePrivateJSON(path string, value any) error {
 	}
 	if len(data)+1 > 4<<20 {
 		return errors.New("session exceeds 4 MiB; export only this site's login cookies")
+	}
+	defer clear(data)
+	data, err = sealSession(path, sessionSite(path), data)
+	if err != nil {
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".sailune-session-*.tmp")
 	if err != nil {

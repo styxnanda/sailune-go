@@ -54,3 +54,6 @@ func ParseBrowserSpec(value string) (BrowserSpec, error)     { return auth.Parse
 func ParseMetadata(site Site, r io.Reader) (Metadata, error) { return scrape.ParseMetadata(site, r) }
 func LoginURL(site Site) (string, error)                     { return auth.LoginURL(site) }
 func OpenLoginBrowser(ctx context.Context, site Site) error  { return auth.OpenLoginBrowser(ctx, site) }
+
+// DefaultSessionDir returns the local session directory, independent of bookmarks.
+func DefaultSessionDir() (string, error) { return auth.DefaultSessionDir() }

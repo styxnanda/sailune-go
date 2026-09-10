@@ -170,25 +170,39 @@ options must come before the command. Use `sailune COMMAND --help` for details.
 | Setting | Precedence, highest first |
 | --- | --- |
 | Library file | `--data PATH`, `SAILUNE_DATA`, `~/.sailune/bookmarks.json` |
-| Session directory | `--sessions DIR`, `SAILUNE_SESSIONS`, `sessions/` beside the library |
+| Session directory | `--sessions DIR`, `SAILUNE_SESSIONS`, OS-local Sailune directory |
 | Request User-Agent | `add --user-agent VALUE`, `SAILUNE_USER_AGENT`, Sailune's default |
 
-The default session directory is `~/.sailune/sessions/`. Changing the library path
-also changes the default session directory unless one is explicitly supplied.
+Sessions are encrypted with AES-256-GCM; keys stay in the OS credential store.
+The default session directory is independent of `--data`:
+
+- macOS: `~/Library/Application Support/Sailune/sessions/`
+- Windows: `%LOCALAPPDATA%\Sailune\sessions\`
+- Linux: `$XDG_STATE_HOME/sailune/sessions/`, or `~/.local/state/sailune/sessions/`
+
+Keep session directories local. Put only your bookmark library in a cloud-sync,
+SMB, or NAS location. Copying an encrypted session file alone does not transfer
+its credential-store key to another computer. See the
+[authentication guide](docs/authentication.md#session-location-and-encryption)
+for platform requirements and migration of old plaintext sessions.
 
 ```sh
 sailune --data ./my-library.json --sessions /private/path/sessions list
 ```
 
-Use a local filesystem. Writes atomically replace the JSON files, and locks
-prevent simultaneous writers from overwriting one another. If a library or
+Library writes atomically replace the JSON file, with a lock to coordinate
+writers on filesystems that support exclusive creation and atomic rename.
+Cloud-sync clients do not coordinate these locks across devices. Use one writer
+at a time, let synchronization finish before switching devices, and keep backups.
+SMB/NAS behavior depends on the filesystem and server; simultaneous distributed
+editing and automatic conflict merging are not supported. If a library or
 session is busy, retry after the other command finishes. After a crash, verify
 that no Sailune process is running before removing a stale `.lock` file.
 
 Back up or restore the library by copying its file while no writer is running.
 `list --json` exports records rather than the storage envelope; it is not a
 restorable library backup. There is no import command. Keep session credentials
-separate from bookmark backups; session files are not encrypted.
+separate from bookmark backups, even though session files are encrypted.
 
 ## Contributing
 
@@ -247,6 +261,8 @@ problems.
 
 - [Go](https://go.dev/) and [golang.org/x/net](https://pkg.go.dev/golang.org/x/net)
   provide the runtime, HTML parser, and public suffix data.
+- [go-keyring](https://github.com/zalando/go-keyring) provides OS credential-store
+  integration for session encryption keys.
 - [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) provides the pure-Go
   SQLite reader for browser profiles.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) provides browser storage and cookie

@@ -66,7 +66,7 @@ func TestLoginConsentBothSites(t *testing.T) {
 			if err != nil || opened != 1 || !strings.Contains(out.String(), `"configured": true`) {
 				t.Fatalf("login: %v %s", err, &out)
 			}
-			if !strings.Contains(prompt.String(), "Type yes") || !strings.Contains(prompt.String(), "without encryption") {
+			if !strings.Contains(prompt.String(), "Type yes") || !strings.Contains(prompt.String(), "encrypted locally") {
 				t.Fatal("missing consent information")
 			}
 			if strings.Contains(out.String()+prompt.String(), "SYNTHETIC_SECRET") {
