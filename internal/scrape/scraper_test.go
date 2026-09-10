@@ -159,3 +159,21 @@ func TestScraperRedirectIsolationAndCancellation(t *testing.T) {
 func cookieExport(domain, name, value string) string {
 	return "# Netscape HTTP Cookie File\n#HttpOnly_" + domain + "\tTRUE\t/\tTRUE\t0\t" + name + "\t" + value + "\n"
 }
+
+func TestFFNChallengeHeader(t *testing.T) {
+	for _, status := range []int{200, 403, 503} {
+		for _, challenged := range []bool{false, true} {
+			s := &Scraper{Client: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				resp := response(req, status, fixture(t, FFN))
+				if challenged {
+					resp.Header.Set("Cf-Mitigated", "challenge")
+				}
+				return resp, nil
+			})}}
+			_, err := s.Fetch(context.Background(), "https://www.fanfiction.net/s/123/1")
+			if errors.Is(err, ErrChallenge) != (challenged || status == 403) {
+				t.Fatalf("status %d, challenge %t: %v", status, challenged, err)
+			}
+		}
+	}
+}

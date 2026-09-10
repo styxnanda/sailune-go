@@ -34,12 +34,30 @@ func interactiveLogin(ctx context.Context, site sailune.Site, source string, sto
 	}
 	input := bufio.NewScanner(deps.input)
 	if source == "" {
-		if _, err := fmt.Fprint(out, "After signing in, enter the browser you used (brave, chrome, chromium, edge, vivaldi, firefox).\nAdd :PROFILE if needed, e.g. brave:Default. Enter nothing to cancel.\nBrowser: "); err != nil {
+		if _, err := fmt.Fprint(out, "After signing in, select a browser family: chromium or gecko (Firefox).\nYou can also enter a full source such as chromium/brave:Default or gecko:/absolute/profile/path.\nEnter nothing to cancel.\nBrowser family: "); err != nil {
 			return sailune.SessionStatus{}, err
 		}
 		source, err = loginLine(ctx, input)
 		if err != nil {
 			return sailune.SessionStatus{}, err
+		}
+		family := strings.ToLower(source)
+		if family == "chromium" || family == "gecko" {
+			choices := "brave, chrome, chromium, edge, opera, vivaldi"
+			if family == "gecko" {
+				choices = "firefox; for a compatible fork use firefox:/absolute/profile/path"
+			}
+			if _, err := fmt.Fprintf(out, "Select the %s browser and optional :PROFILE (%s).\nBrowser: ", family, choices); err != nil {
+				return sailune.SessionStatus{}, err
+			}
+			browser, err := loginLine(ctx, input)
+			if err != nil {
+				return sailune.SessionStatus{}, err
+			}
+			if browser == "" || strings.EqualFold(browser, "cancel") {
+				return sailune.SessionStatus{}, errLoginCanceled
+			}
+			source = family + "/" + browser
 		}
 	}
 	if source == "" || strings.EqualFold(source, "cancel") {
@@ -61,7 +79,11 @@ func interactiveLogin(ctx context.Context, site sailune.Site, source string, sto
 	if ctx.Err() != nil {
 		return sailune.SessionStatus{}, ctx.Err()
 	}
-	return store.ImportBrowser(ctx, site, source)
+	status, err := store.ImportBrowser(ctx, site, source)
+	if err == nil {
+		fmt.Fprintln(out, "Cookies saved locally. Website login has not been verified; add a work to test access.")
+	}
+	return status, err
 }
 
 // Cancellation stops the flow even while stdin is waiting. The read goroutine

@@ -15,9 +15,10 @@ sailune auth ffn --login
 1. Sailune opens the selected site's homepage in your OS default browser.
 2. Use the site's login controls and complete login yourself. Sailune does not
    fill passwords, monitor the browser, or detect login completion.
-3. Return to the terminal and enter the browser you used: `brave`, `chrome`,
-   `chromium`, `edge`, `vivaldi`, or `firefox`. Add a profile if necessary, for
-   example `brave:Default` or `firefox:/absolute/profile/path`.
+3. Return to the terminal and choose `chromium` or `gecko`. Then select the
+   browser and optional profile, such as `brave:Default` or
+   `firefox:/absolute/profile/path`. A full source such as
+   `chromium/brave:Default` can also be entered at the first prompt.
 4. Review the prompt describing which site's cookies will be read and where
    they will be saved. Type `yes` to consent to the import. This replaces any
    saved session for that site.
@@ -71,12 +72,21 @@ browsing sessions, are unavailable; use a regular profile.
 
 ### Select the browser profile
 
-The format is `BROWSER[:PROFILE]`. Supported browser names:
-`brave`, `chrome`, `chromium`, `edge`, `vivaldi`, `firefox`.
+The format is `FAMILY/BROWSER[:PROFILE]`:
+
+- `chromium/brave`, `chromium/chrome`, `chromium/chromium`, `chromium/edge`,
+  `chromium/opera`, `chromium/vivaldi` share the Chromium importer.
+- `gecko/firefox` shares the Firefox importer. `gecko` is a shorthand; use
+  `gecko:/absolute/profile/path` for a compatible Firefox fork. Only Firefox's
+  standard directories are discovered automatically; fork schemas can differ.
+
+The browser identifies its profile location and, for Chromium, encryption key.
+Old `BROWSER[:PROFILE]` values remain accepted. Bare `chromium` still means the
+Chromium application; it does not automatically select Brave or Chrome.
 
 ```sh
-sailune auth ao3 --cookies-from-browser brave:Default
-sailune auth ffn --cookies-from-browser "chrome:Profile 1"
+sailune auth ao3 --cookies-from-browser chromium/brave:Default
+sailune auth ffn --cookies-from-browser "chromium/chrome:Profile 1"
 sailune auth ao3 --cookies-from-browser "firefox:/absolute/path/to/profile"
 ```
 
@@ -286,3 +296,17 @@ sailune add 'https://www.fanfiction.net/s/STORY_ID/1' --no-fetch \
 
 Failed fetches leave the bookmark library unchanged. For AO3, requests include
 `view_adult=true` to acknowledge the adult-content interstitial.
+
+### Diagnose FFN access
+
+A successful `auth` command means cookies were saved locally. It does not prove
+that FFN accepted the login or that a story can be fetched. Test with the story
+URL using `sailune add 'https://www.fanfiction.net/s/STORY_ID/1'`.
+
+If the website itself will not sign in, cookie import cannot complete that login.
+If importing fails, check the selected profile and the reported database or key
+error. If adding the story fails, report the exact error and story URL without
+cookie values. Responses with Cloudflare's `cf-mitigated: challenge` header are
+identified as challenges, including when returned with HTTP 503. This follows
+[Cloudflare's documented challenge detection](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/).
+Reimporting cookies is not proof that a challenge has been resolved.

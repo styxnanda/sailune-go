@@ -271,3 +271,66 @@ func TestChromiumPlatformKeySelection(t *testing.T) {
 		t.Fatalf("Windows legacy: %v", err)
 	}
 }
+
+func TestBrowserFamilies(t *testing.T) {
+	for _, tc := range []struct{ input, name, profile string }{
+		{"chromium/brave:Default", "brave", "Default"},
+		{"chromium/chrome:Profile 1", "chrome", "Profile 1"},
+		{"CHROMIUM/OPERA", "opera", ""},
+		{"chromium", "chromium", ""},
+		{"gecko", "firefox", ""},
+		{"gecko/firefox:/fork/profile", "firefox", "/fork/profile"},
+		{`gecko:C:\Users\test\profile`, "firefox", `C:\Users\test\profile`},
+	} {
+		spec, err := ParseBrowserSpec(tc.input)
+		if err != nil || spec.Name != tc.name || spec.Profile != tc.profile {
+			t.Fatalf("%q: %+v, %v", tc.input, spec, err)
+		}
+	}
+	for _, value := range []string{"gecko/brave", "chromium/firefox", "chromium/gecko", "webkit/chrome", "chromium/", "gecko/firefox:"} {
+		if _, err := ParseBrowserSpec(value); err == nil {
+			t.Fatalf("accepted invalid family source %q", value)
+		}
+	}
+}
+
+func TestOperaRootProfile(t *testing.T) {
+	profile, _ := browserFixture(t, "opera", 24)
+	got, err := chooseBrowserProfile(BrowserSpec{Name: "opera"}, []string{profile})
+	if err != nil || got != profile {
+		t.Fatalf("root profile: %q, %v", got, err)
+	}
+	for platform, suffix := range map[string]string{
+		"darwin":  "Library/Application Support/com.operasoftware.Opera",
+		"linux":   "config/opera",
+		"windows": "roaming/Opera Software/Opera Stable",
+	} {
+		roots := browserRoots("opera", platform, "/home", "/home/config", "/home/local", "/home/roaming")
+		if len(roots) != 1 || roots[0] != filepath.Join("/home", suffix) {
+			t.Fatalf("%s: %v", platform, roots)
+		}
+	}
+}
+
+func TestFamilyImportBothSites(t *testing.T) {
+	for _, browser := range []string{"firefox", "opera"} {
+		profile, db := browserFixture(t, browser, 17)
+		for _, host := range []string{".fanfiction.net", ".archiveofourown.org"} {
+			if browser == "firefox" {
+				execSQL(t, db, "INSERT INTO moz_cookies VALUES (?, 'login', 'TEST', '/', 0, 1, 1, '')", host)
+			} else {
+				execSQL(t, db, "INSERT INTO cookies VALUES (?, 'login', 'TEST', NULL, '/', 0, 1, 1, '')", host)
+			}
+		}
+		source := "chromium/opera:" + profile
+		if browser == "firefox" {
+			source = "gecko:" + profile
+		}
+		for _, site := range []Site{AO3, FFN} {
+			status, err := (SessionStore{Dir: t.TempDir()}).ImportBrowser(context.Background(), site, source)
+			if err != nil || status.UsableCookies != 1 {
+				t.Fatalf("%s %s: %+v, %v", source, site, status, err)
+			}
+		}
+	}
+}

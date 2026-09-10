@@ -1,6 +1,7 @@
 package scrape
 
 import (
+	"fmt"
 	"io"
 	"regexp"
 	"strconv"
@@ -44,7 +45,14 @@ func ParseMetadata(site Site, r io.Reader) (Metadata, error) {
 		if strings.Contains(text, "story not found") || strings.Contains(text, "unable to locate story") || strings.Contains(text, "mystery work") {
 			return Metadata{}, ErrWorkUnavailable
 		}
-		return Metadata{}, ErrMetadata
+		missing := []string{}
+		if m.Title == "" {
+			missing = append(missing, "work title")
+		}
+		if len(m.Authors) == 0 {
+			missing = append(missing, "work author")
+		}
+		return Metadata{}, fmt.Errorf("%w (missing %s in the returned page)", ErrMetadata, strings.Join(missing, " and "))
 	}
 	return m, nil
 }

@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	ErrLoginRequired   = errors.New("login required or session expired; log in in your browser, then run sailune auth SITE --cookies FILE")
+	ErrLoginRequired   = errors.New("login required or session expired; run sailune auth SITE --login, then retry the work")
 	ErrChallenge       = errors.New("site denied access or requires a browser challenge; open the work in your browser and refresh imported cookies; browser-bound challenges may still prevent fetching")
 	ErrWorkUnavailable = errors.New("work is unavailable, deleted, or not visible to this account")
 	ErrRateLimited     = errors.New("site rate limit reached; wait before retrying")
@@ -79,6 +79,10 @@ func (s *Scraper) Fetch(ctx context.Context, raw string) (Metadata, error) {
 			return errors.New("could not fetch work: network, timeout, TLS, or disallowed redirect; try again or use --no-fetch")
 		}
 		defer resp.Body.Close()
+		// Cloudflare identifies challenge pages independently of HTTP status.
+		if strings.EqualFold(resp.Header.Get("Cf-Mitigated"), "challenge") {
+			return fmt.Errorf("HTTP %d, Cloudflare challenge (cookie import does not verify website access): %w", resp.StatusCode, ErrChallenge)
+		}
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
 			return ErrLoginRequired

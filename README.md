@@ -56,6 +56,22 @@ sailune add 'https://archiveofourown.org/works/123456' --no-fetch \
   --title 'My favorite story' --author 'SomeAuthor'
 ```
 
+### Refresh source metadata
+
+```sh
+sailune refresh 1
+sailune refresh 1 --json
+sailune refresh 1 --cookies-from-browser chromium/brave
+```
+
+Use the bookmark ID from `sailune list`. `refresh` fetches the latest source
+metadata, including chapter and word counts, summary, completion status, and
+source dates. It uses the saved AO3 or FFN session, and accepts `--user-agent`.
+Your display title, author, reading status, last chapter read, tags, and notes
+stay unchanged. The latest source title and authors are in the JSON `metadata`
+object. Offline bookmarks can also be refreshed. A failed fetch preserves the
+previous bookmark and metadata. `update` continues to edit personal fields only.
+
 ### Authenticate to AO3 and FFN
 
 Login is optional. Open your default browser and sign in manually:
@@ -90,9 +106,18 @@ sailune add 'https://archiveofourown.org/works/61993375' --cookies-from-browser 
 sailune add 'https://www.fanfiction.net/s/123456/1' --cookies-from-browser firefox
 ```
 
-Supported browser names are `brave`, `chrome`, `chromium`, `edge`, `vivaldi`, and
-`firefox`. Select a profile with `brave:Default`, `"chrome:Profile 1"`, or
-`firefox:/absolute/profile/path`. If several profiles are found, specify one.
+Browser sources are grouped into `chromium` and `gecko` families:
+
+- Chromium: `chromium/brave`, `chromium/chrome`, `chromium/chromium`,
+  `chromium/edge`, `chromium/opera`, `chromium/vivaldi`.
+- Gecko: `gecko/firefox` (or `gecko`). Compatible Firefox forks can use
+  `gecko:/absolute/profile/path`; automatic discovery searches Firefox only.
+
+Add `:PROFILE`, for example `chromium/brave:Default` or
+`"chromium/chrome:Profile 1"`. Browser names are still needed to find each
+installation's profile and encryption key. Existing names such as `brave` and
+`firefox` remain valid. Bare `chromium` selects the Chromium application for
+compatibility. If several profiles are found, specify one.
 On macOS, Chromium imports may prompt for access to the browser's Safe Storage
 item in Keychain. See the [authentication guide](docs/authentication.md) for
 profile discovery, OS support, session renewal, and troubleshooting.

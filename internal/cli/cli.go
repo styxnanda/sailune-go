@@ -27,6 +27,7 @@ Commands:
   list          List or search bookmarks
   show ID       Show one bookmark
   update ID     Change personal metadata or progress
+  refresh ID    Fetch the latest source metadata for a saved bookmark
   delete ID     Permanently remove one bookmark
   auth SITE     Import, inspect, or clear an AO3/FFN browser session
 
@@ -47,9 +48,9 @@ Add/update options:
   Status: planned (default), reading, completed, hold, dropped
   Chapter: last chapter read, default 0; never inferred from a URL
 
-Add fetch options:
+Add/refresh fetch options:
   --cookies-from-browser BROWSER[:PROFILE]  Import this site's browser cookies
-  --no-fetch       Bookmark offline with manual metadata
+  --no-fetch       Bookmark offline with manual metadata (add only)
   --user-agent UA  User-Agent used for the request (or SAILUNE_USER_AGENT)
   By default, add fetches title, authors, summary, tags, and story statistics.
   --title and --author override fetched values when nonempty.
@@ -97,7 +98,7 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	}
 	command := args[0]
 	switch command {
-	case "add", "list", "show", "update", "delete", "auth":
+	case "add", "list", "show", "update", "refresh", "delete", "auth":
 	default:
 		return fmt.Errorf("unknown command %q; run sailune --help", command)
 	}
@@ -108,8 +109,8 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	var chapter int
 	var noFetch, clearSession, login bool
 	var cookies, userAgent, browserCookies string
-	if command == "auth" || command == "add" {
-		fs.StringVar(&browserCookies, "cookies-from-browser", "", "browser[:profile]: brave, chrome, chromium, edge, vivaldi, or firefox")
+	if command == "auth" || command == "add" || command == "refresh" {
+		fs.StringVar(&browserCookies, "cookies-from-browser", "", "family/browser[:profile]: chromium/brave|chrome|chromium|edge|opera|vivaldi, gecko/firefox; legacy names accepted")
 	}
 	if command == "auth" {
 		fs.BoolVar(&login, "login", false, "open the default browser and ask for consent before importing cookies")
@@ -118,6 +119,8 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	}
 	if command == "add" {
 		fs.BoolVar(&noFetch, "no-fetch", false, "save manually without a network request")
+	}
+	if command == "add" || command == "refresh" {
 		fs.StringVar(&userAgent, "user-agent", os.Getenv("SAILUNE_USER_AGENT"), "User-Agent for the fetch")
 	}
 	if command == "add" || command == "update" {
@@ -170,7 +173,7 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		}
 	}
 	var id int64
-	if command == "show" || command == "update" || command == "delete" {
+	if command == "show" || command == "update" || command == "refresh" || command == "delete" {
 		var err error
 		id, err = strconv.ParseInt(fs.Arg(0), 10, 64)
 		if err != nil || id < 1 {
@@ -241,6 +244,14 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 			}
 			result, err = lib.AddScraped(ctx, b, fetcher)
 		}
+	case "refresh":
+		if fetcher == nil {
+			fetcher = &sailune.Scraper{Sessions: sessionStore, UserAgent: userAgent}
+		}
+		if browserCookies != "" {
+			fetcher = browserSessionFetcher{source: browserCookies, sessions: sessionStore, next: fetcher}
+		}
+		result, err = lib.Refresh(ctx, id, fetcher)
 	case "list":
 		result, err = lib.List(sailune.Filter{Query: query, Site: sailune.Site(site), Status: sailune.Status(status), Tag: tag})
 	case "show":

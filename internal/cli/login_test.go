@@ -36,16 +36,19 @@ func TestLoginConsentBothSites(t *testing.T) {
 		}
 	}
 	for _, site := range []sailune.Site{sailune.AO3, sailune.FFN} {
-		for _, hint := range []bool{false, true} {
+		for _, mode := range []string{"legacy", "hint", "family"} {
 			var out, prompt bytes.Buffer
 			store := sailune.SessionStore{Dir: t.TempDir()}
 			spec := "firefox:" + profile
 			input := "yes\n"
 			args := []string{"--sessions", store.Dir, "auth", string(site), "--login", "--json"}
-			if hint {
+			if mode == "hint" {
 				args = append(args, "--cookies-from-browser", spec)
 			} else {
 				input = spec + "\nyes\n"
+				if mode == "family" {
+					input = "gecko\n" + spec + "\nyes\n"
+				}
 			}
 			opened := 0
 			deps := loginDependencies{input: strings.NewReader(input), open: func(ctx context.Context, got sailune.Site) error {
@@ -130,5 +133,31 @@ func TestLoginContextCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("login ignored cancellation")
+	}
+}
+
+func TestLoginFamilySelection(t *testing.T) {
+	for _, tc := range []struct{ input, source string }{
+		{"chromium\nbrave:Default\nno\n", "chromium/brave:Default"},
+		{"chromium\nopera\nno\n", "chromium/opera"},
+		{"gecko\nfirefox:/fork/profile\nno\n", "gecko/firefox:/fork/profile"},
+		{"chromium\n\n", ""},
+		{"gecko\ncancel\n", ""},
+	} {
+		var prompt bytes.Buffer
+		store := sailune.SessionStore{Dir: t.TempDir()}
+		_, err := interactiveLogin(context.Background(), sailune.FFN, "", store, &prompt, loginDependencies{
+			input: strings.NewReader(tc.input), open: func(context.Context, sailune.Site) error { return nil },
+		})
+		if !errors.Is(err, errLoginCanceled) {
+			t.Fatalf("%q: %v", tc.input, err)
+		}
+		if tc.source != "" && !strings.Contains(prompt.String(), "from "+tc.source) {
+			t.Fatalf("incorrect source: %s", &prompt)
+		}
+		status, err := store.Status(sailune.FFN)
+		if err != nil || status.Configured {
+			t.Fatal("selection without consent imported cookies")
+		}
 	}
 }

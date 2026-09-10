@@ -217,3 +217,42 @@ func TestDataPrecedenceAndSafeOutput(t *testing.T) {
 		t.Fatal("explicit path did not override environment")
 	}
 }
+
+func TestRefreshCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library.json")
+	fetcher := &testFetcher{}
+	var out, stderr bytes.Buffer
+	call := func(args ...string) error {
+		out.Reset()
+		stderr.Reset()
+		return run(context.Background(), append([]string{"--data", path}, args...), &out, &stderr, fetcher)
+	}
+	if err := call("add", "https://fanfiction.net/s/123", "--no-fetch", "--title", "Personal", "--chapter", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := call("refresh", "1", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	var b sailune.Bookmark
+	if err := json.Unmarshal(out.Bytes(), &b); err != nil || b.Metadata == nil || b.Metadata.Chapters != 5 || b.Chapter != 2 || b.Title != "Personal" {
+		t.Fatalf("refresh: %s %v", &out, err)
+	}
+	fetcher.fail = true
+	before, _ := os.ReadFile(path)
+	if err := call("refresh", "1"); !errors.Is(err, sailune.ErrLoginRequired) {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(before, after) {
+		t.Fatal("failed refresh modified library")
+	}
+	calls := fetcher.calls
+	for _, args := range [][]string{{"refresh", "999"}, {"refresh", "0"}, {"refresh", "1", "--no-fetch"}, {"refresh", "1", "--chapter", "3"}} {
+		if err := call(args...); err == nil {
+			t.Fatalf("accepted %v", args)
+		}
+	}
+	if calls != fetcher.calls {
+		t.Fatal("invalid refresh fetched")
+	}
+}

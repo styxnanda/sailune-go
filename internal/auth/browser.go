@@ -20,16 +20,28 @@ import (
 )
 
 // BrowserSpec selects a browser and optionally a profile name or directory.
-// The syntax is browser[:profile], for example brave:Default or firefox:/path.
+// The syntax is family/browser[:profile]; legacy browser[:profile] is accepted.
 type BrowserSpec struct{ Name, Profile string }
 
 func ParseBrowserSpec(value string) (BrowserSpec, error) {
 	name, profile, hasProfile := strings.Cut(value, ":")
 	name = strings.ToLower(name)
+	if name == "gecko" {
+		name = "firefox"
+	}
+	if family, browser, qualified := strings.Cut(name, "/"); qualified {
+		if (family != "chromium" && family != "gecko") || browser == "" {
+			return BrowserSpec{}, errors.New("use chromium/BROWSER[:PROFILE] or gecko/firefox[:PROFILE]")
+		}
+		if (family == "gecko") != (browser == "firefox") {
+			return BrowserSpec{}, errors.New("browser does not belong to the selected family")
+		}
+		name = browser
+	}
 	switch name {
-	case "brave", "chrome", "chromium", "edge", "vivaldi", "firefox":
+	case "brave", "chrome", "chromium", "edge", "opera", "vivaldi", "firefox":
 	default:
-		return BrowserSpec{}, errors.New("browser must be brave, chrome, chromium, edge, vivaldi, or firefox")
+		return BrowserSpec{}, errors.New("choose chromium/brave, chromium/chrome, chromium/chromium, chromium/edge, chromium/opera, chromium/vivaldi, or gecko/firefox")
 	}
 	if hasProfile && profile == "" {
 		return BrowserSpec{}, errors.New("browser profile is empty; use BROWSER or BROWSER:PROFILE")
@@ -84,13 +96,16 @@ func browserRoots(name, platform, home, config, local, roaming string) []string 
 	switch platform {
 	case "darwin":
 		base = filepath.Join(home, "Library/Application Support")
-		suffix = map[string]string{"brave": "BraveSoftware/Brave-Browser", "chrome": "Google/Chrome", "chromium": "Chromium", "edge": "Microsoft Edge", "vivaldi": "Vivaldi"}[name]
+		suffix = map[string]string{"brave": "BraveSoftware/Brave-Browser", "chrome": "Google/Chrome", "chromium": "Chromium", "edge": "Microsoft Edge", "opera": "com.operasoftware.Opera", "vivaldi": "Vivaldi"}[name]
 	case "windows":
 		base = local
+		if name == "opera" {
+			return []string{filepath.Join(roaming, "Opera Software/Opera Stable")}
+		}
 		suffix = map[string]string{"brave": "BraveSoftware/Brave-Browser/User Data", "chrome": "Google/Chrome/User Data", "chromium": "Chromium/User Data", "edge": "Microsoft/Edge/User Data", "vivaldi": "Vivaldi/User Data"}[name]
 	default:
 		base = config
-		suffix = map[string]string{"brave": "BraveSoftware/Brave-Browser", "chrome": "google-chrome", "chromium": "chromium", "edge": "microsoft-edge", "vivaldi": "vivaldi"}[name]
+		suffix = map[string]string{"brave": "BraveSoftware/Brave-Browser", "chrome": "google-chrome", "chromium": "chromium", "edge": "microsoft-edge", "opera": "opera", "vivaldi": "vivaldi"}[name]
 	}
 	return []string{filepath.Join(base, filepath.FromSlash(suffix))}
 }
@@ -128,6 +143,10 @@ func chooseBrowserProfile(spec BrowserSpec, roots []string) (string, error) {
 				candidates = append(candidates, p)
 			}
 			continue
+		}
+		// Opera can store cookies directly in its user-data directory.
+		if spec.Name == "opera" && cookieDB(spec.Name, root) != "" {
+			candidates = append(candidates, root)
 		}
 		entries, err := os.ReadDir(root)
 		if err != nil {

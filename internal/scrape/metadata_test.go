@@ -72,3 +72,20 @@ func TestMetadataRejectsNonWorkPages(t *testing.T) {
 		t.Fatalf("literal title: %+v %v", m, err)
 	}
 }
+
+func TestFFNNestedWorkHeader(t *testing.T) {
+	page, err := os.ReadFile("testdata/ffn-nested-header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := ParseMetadata(FFN, strings.NewReader(string(page)))
+	if err != nil || m.Title != "Example story" || len(m.Authors) != 1 || m.Authors[0] != "Example Writer" || m.Chapters != 21 || m.Words != 42000 || m.Summary != "An example summary." || m.Updated != "2026-09-10" || m.Published != "2026-05-16" {
+		t.Fatalf("nested header: %+v %v", m, err)
+	}
+	for _, part := range []string{`<b class="xcontrast_txt">Example story</b>`, `<a class="xcontrast_txt" href="/u/123/ExampleWriter">Example Writer</a>`} {
+		_, err := ParseMetadata(FFN, strings.NewReader(strings.Replace(string(page), part, "", 1)))
+		if !errors.Is(err, ErrMetadata) || !strings.Contains(err.Error(), "missing work") {
+			t.Fatalf("missing header diagnostics: %v", err)
+		}
+	}
+}

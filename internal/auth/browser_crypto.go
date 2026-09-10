@@ -138,10 +138,10 @@ func chromiumPlaintext(host string, plain []byte, version int) (string, error) {
 func browserSecret(ctx context.Context, browser string) ([]byte, error) {
 	var cmd *exec.Cmd
 	if runtime.GOOS == "darwin" {
-		account := map[string]string{"brave": "Brave", "chrome": "Chrome", "chromium": "Chromium", "edge": "Microsoft Edge", "vivaldi": "Vivaldi"}[browser]
+		account := map[string]string{"brave": "Brave", "chrome": "Chrome", "chromium": "Chromium", "edge": "Microsoft Edge", "opera": "Opera", "vivaldi": "Vivaldi"}[browser]
 		cmd = exec.CommandContext(ctx, "/usr/bin/security", "find-generic-password", "-w", "-a", account, "-s", account+" Safe Storage")
 	} else {
-		application := map[string]string{"brave": "brave", "chrome": "chrome", "chromium": "chromium", "edge": "chromium", "vivaldi": "chrome"}[browser]
+		application := map[string]string{"brave": "brave", "chrome": "chrome", "chromium": "chromium", "edge": "chromium", "opera": "chromium", "vivaldi": "chrome"}[browser]
 		cmd = exec.CommandContext(ctx, "secret-tool", "lookup", "application", application)
 	}
 	// Output stays in memory: it is never inherited by the terminal or logged.
@@ -157,6 +157,10 @@ func browserSecret(ctx context.Context, browser string) ([]byte, error) {
 
 func windowsBrowserKey(profile string) ([]byte, error) {
 	data, err := os.ReadFile(filepath.Join(filepath.Dir(profile), "Local State"))
+	if os.IsNotExist(err) {
+		// Opera's root profile keeps Local State alongside its cookie database.
+		data, err = os.ReadFile(filepath.Join(profile, "Local State"))
+	}
 	if err != nil {
 		return nil, errors.New("cannot read Chromium Local State beside the selected profile")
 	}

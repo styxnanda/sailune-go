@@ -154,6 +154,42 @@ func (l Library) Get(id int64) (Bookmark, error) {
 	return Bookmark{}, fmt.Errorf("%w: %d", ErrNotFound, id)
 }
 
+// Refresh fetches a new source snapshot without changing personal fields.
+// Fetching happens outside the write lock; concurrent edits are preserved.
+func (l Library) Refresh(ctx context.Context, id int64, fetcher MetadataFetcher) (Bookmark, error) {
+	b, err := l.Get(id)
+	if err != nil {
+		return Bookmark{}, err
+	}
+	if fetcher == nil {
+		return Bookmark{}, errors.New("metadata fetcher is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return Bookmark{}, err
+	}
+	m, err := fetcher.Fetch(ctx, b.URL)
+	if err != nil {
+		return Bookmark{}, err
+	}
+	var result Bookmark
+	err = l.Store.change(func(db *database) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for i, current := range db.Bookmarks {
+			if current.ID != id {
+				continue
+			}
+			current.Metadata = &m
+			current.UpdatedAt = time.Now().UTC()
+			db.Bookmarks[i], result = current, current
+			return nil
+		}
+		return fmt.Errorf("%w: %d", ErrNotFound, id)
+	})
+	return result, err
+}
+
 // Patch uses pointers so an omitted field differs from an explicit empty value.
 type Patch struct {
 	Title   *string
