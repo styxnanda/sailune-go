@@ -253,51 +253,116 @@ Deletion is immediate.
 JSON output is a bookmark for add/show/update/refresh, an array for list (including `[]`
 for no matches), `{"deleted_id":2}` for delete, or session status for auth.
 Bookmark JSON also includes `effective_metadata` and computed `progress`; the library
-file stores only source/personal data, not these derived output fields.
+database also maintains derived indexes internally; the JSON snapshot includes
+only the complete bookmark records and restore metadata.
 Open/resume JSON contains `id`, `url`, and `opened`; use `--print-url` to avoid launching.
 Errors go to stderr and return a nonzero exit status.
 
 Command options can precede or follow a URL/ID. Global `--data` and `--sessions`
 options must come before the command. Use `sailune COMMAND --help` for details.
 
-### Storage and backups
+### SQLite storage, migration, and device transfers
+
+Sailune stores its local library in SQLite. Existing JSON libraries are migrated
+explicitly; the original JSON is preserved unchanged. Stop old Sailune writers
+before migrating. On first use, Sailune
+reports an existing default JSON library rather than silently starting empty.
+
+```sh
+sailune migrate ~/.sailune/bookmarks.json
+# For a custom legacy path, choose a distinct destination:
+sailune --data /private/library/library.sqlite3 migrate ./old-bookmarks.json
+```
+
+Migration restores every bookmark, ID, next-ID watermark, timestamp, personal
+field, metadata snapshot, and override. It requires a pristine destination and
+commits all records in one transaction. Invalid input changes no existing records.
+Passing an old JSON file as `--data` reports how to migrate; it never rewrites
+that file in place. `--data` now always selects a SQLite file, regardless of suffix.
 
 | Setting | Precedence, highest first |
 | --- | --- |
-| Library file | `--data PATH`, `SAILUNE_DATA`, `~/.sailune/bookmarks.json` |
-| Session directory | `--sessions DIR`, `SAILUNE_SESSIONS`, OS-local Sailune directory |
-| Request User-Agent | `add --user-agent VALUE`, `SAILUNE_USER_AGENT`, Sailune's default |
+| Library file | `--data PATH`, `SAILUNE_DATA`, OS-local path below |
+| Session directory | `--sessions DIR`, `SAILUNE_SESSIONS`, OS-local Sailune sessions directory |
+| Request User-Agent | `--user-agent VALUE`, `SAILUNE_USER_AGENT`, Sailune's default |
 
-Sessions are encrypted with AES-256-GCM; keys stay in the OS credential store.
-The default session directory is independent of `--data`:
+Default library locations:
 
-- macOS: `~/Library/Application Support/Sailune/sessions/`
-- Windows: `%LOCALAPPDATA%\Sailune\sessions\`
-- Linux: `$XDG_STATE_HOME/sailune/sessions/`, or `~/.local/state/sailune/sessions/`
+- macOS: `~/Library/Application Support/Sailune/library.sqlite3`
+- Windows: `%LOCALAPPDATA%\Sailune\library.sqlite3`
+- Linux: `$XDG_STATE_HOME/sailune/library.sqlite3`, or `~/.local/state/sailune/library.sqlite3`
 
-Keep session directories local. Put only your bookmark library in a cloud-sync,
-SMB, or NAS location. Copying an encrypted session file alone does not transfer
-its credential-store key to another computer. See the
-[authentication guide](docs/authentication.md#session-location-and-encryption)
-for platform requirements and migration of old plaintext sessions.
+Sessions remain in the adjacent `sessions` directory by default, independently
+of `--data`. They continue using AES-256-GCM with keys in the OS credential store.
+See the [authentication guide](docs/authentication.md#session-location-and-encryption).
+
+**Keep the live SQLite library and sessions on a local disk.** SQLite transactions
+coordinate processes on one device; cloud clients cannot coordinate database
+writes across devices. Do not point `--data` at Dropbox/iCloud/OneDrive, SMB, or
+NAS storage. Copying a live database or its journal is not a transfer workflow.
+This release uses SQLite rollback journaling, full synchronous writes, a bounded
+writer wait, and secure-delete; SQLite owns recovery, so do not remove journal
+files manually.
+
+Transfer through a complete JSON snapshot instead:
 
 ```sh
-sailune --data ./my-library.json --sessions /private/path/sessions list
+# Device A: export to a new local filename, then upload/copy this closed file.
+sailune export ./sailune-transfer-2026-09-12.json
+# Device B: download the complete file, then restore into a pristine library.
+sailune import ./sailune-transfer-2026-09-12.json
+# An existing library can explicitly merge new works, preserving its own edits.
+sailune import ./sailune-transfer-2026-09-12.json --merge
+# For a full replacement snapshot, restore to a new path and switch --data.
+sailune --data /private/library/restored.sqlite3 import ./sailune-transfer-2026-09-12.json
 ```
 
-Library writes atomically replace the JSON file, with a lock to coordinate
-writers on filesystems that support exclusive creation and atomic rename.
-Cloud-sync clients do not coordinate these locks across devices. Use one writer
-at a time, let synchronization finish before switching devices, and keep backups.
-SMB/NAS behavior depends on the filesystem and server; simultaneous distributed
-editing and automatic conflict merging are not supported. If a library or
-session is busy, retry after the other command finishes. After a crash, verify
-that no Sailune process is running before removing a stale `.lock` file.
+`export` takes one consistent snapshot and publishes a complete file without
+replacing an existing destination. Use a local filesystem supporting hard links
+for export publication, then upload the result with your preferred cloud client.
+`export -` writes JSON to stdout for pipelines. Redirection/pipeline permissions
+and partial-output handling belong to the caller.
 
-Back up or restore the library by copying its file while no writer is running.
-`list --json` exports records rather than the storage envelope; it is not a
-restorable library backup. There is no import command. Keep session credentials
-separate from bookmark backups, even though session files are encrypted.
+`import` restores original IDs into a pristine database. `--merge` allocates local
+IDs for new URLs and reports skipped duplicates; it does **not** synchronize edits,
+propagate deletions, or resolve conflicts between devices. Reimporting a transfer
+with `--merge` is idempotent by canonical URL. Use a new database for an exact
+snapshot restore. Fully automatic bidirectional sync is a separate milestone.
+
+The versioned `sailune-library` envelope includes the next-ID watermark and all
+bookmark fields. Imports accept this format and the legacy version-1 library
+JSON, validate the entire input, and are limited to 256 MiB. `list --json` is a
+view of records with derived fields, not a restorable snapshot. No cookies,
+credential-store keys, or authentication sessions are exported.
+
+### Local privacy and performance
+
+The library lives in app-data storage rather than the project or Documents
+folder. New private directories use owner-only permissions; on Unix the database
+and file exports use mode `0600`, and on Windows they receive protected ACLs for
+the current user and SYSTEM. Use a dedicated private directory for custom paths;
+Sailune does not change access permissions on arbitrary existing parent folders.
+On Windows, a private parent is also important for SQLite's temporary journal.
+The default app-data directory is restricted when initializing the database.
+
+**The database and JSON exports are not encrypted.** Permissions protect against
+other unprivileged accounts; they do not deny the owning user access or protect
+against software running as that user. Administrators can override permissions.
+A same-user desktop CLI cannot enforce a root-only database while accessing it
+normally. Filename obfuscation would not change that security boundary.
+
+Use OS full-disk encryption for device-at-rest protection. SQLCipher/SEE and a
+key-recovery design are possible future choices if encrypted database files become
+a requirement; no machine-bound database keys or fake obfuscation are introduced
+here. Legacy JSON and uploaded export copies remain readable to anyone who can
+access those files. Secure-delete is not a guarantee of erasure from SSDs or backups.
+
+SQLite stores bookmarks individually and maintains indexed effective fields and
+tag/fandom lookups. Filtering, sorting, and pagination execute in SQL; reads only
+decode returned bookmarks, and updates rewrite one bookmark and its indexes.
+Substring search still scans matching rows; this preserves existing search
+semantics without claiming full-text indexing. See
+[storage design](docs/storage.md) for operational details and validation.
 
 See [the mobile architecture decision](docs/mobile-architecture.md) for the planned
 shared-library approach to a future mobile app.
@@ -325,7 +390,7 @@ You can also run commands with `go run ./cmd/sailune`. Use `--data` and
 cmd/sailune/             CLI executable entry point
 internal/cli/            Commands, output, and interactive login prompts
 internal/model/          Bookmark types, validation, and site URL rules
-internal/library/        Bookmark operations and JSON storage
+internal/library/        Bookmark operations, SQLite storage, and JSON transfers
 internal/auth/           Sessions, browser cookies, encryption, and browser launch
 internal/scrape/         HTTP fetching and site metadata parsers
 internal/scrape/testdata/ Synthetic HTML fixtures

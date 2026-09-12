@@ -2,9 +2,11 @@ package library
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -34,14 +36,12 @@ func (l Library) AddScraped(ctx context.Context, b Bookmark, fetcher MetadataFet
 	if err := model.Validate(b); err != nil {
 		return Bookmark{}, err
 	}
-	existing, err := l.List(Filter{})
+	existingID, err := l.Store.findURL(canonical)
 	if err != nil {
 		return Bookmark{}, err
 	}
-	for _, saved := range existing {
-		if saved.URL == canonical {
-			return Bookmark{}, fmt.Errorf("%w (ID %d)", ErrDuplicate, saved.ID)
-		}
+	if existingID != 0 {
+		return Bookmark{}, fmt.Errorf("%w (ID %d)", ErrDuplicate, existingID)
 	}
 	if fetcher == nil {
 		return Bookmark{}, errors.New("metadata fetcher is required")
@@ -75,39 +75,48 @@ func (l Library) Add(b Bookmark) (Bookmark, error) {
 	if err := model.Validate(b); err != nil {
 		return Bookmark{}, err
 	}
-	err = l.Store.change(func(db *database) error {
-		for _, existing := range db.Bookmarks {
-			if existing.URL == b.URL {
-				return fmt.Errorf("%w (ID %d)", ErrDuplicate, existing.ID)
-			}
+	err = l.Store.write(func(tx *sql.Tx) error {
+		var id int64
+		err := tx.QueryRow("SELECT id FROM bookmarks WHERE url=?", b.URL).Scan(&id)
+		if err == nil {
+			return fmt.Errorf("%w (ID %d)", ErrDuplicate, id)
 		}
-		if db.NextID == math.MaxInt64 {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err := tx.QueryRow("SELECT next_id FROM library_meta WHERE singleton=1").Scan(&b.ID); err != nil {
+			return err
+		}
+		if b.ID == math.MaxInt64 {
 			return errors.New("library ID limit reached")
 		}
-		b.ID = db.NextID
-		db.NextID++
+		if _, err := tx.Exec("UPDATE library_meta SET next_id=next_id+1 WHERE singleton=1"); err != nil {
+			return err
+		}
 		b.CreatedAt = time.Now().UTC()
 		b.UpdatedAt = b.CreatedAt
 		if b.Chapter > 0 && b.LastReadAt.IsZero() {
 			b.LastReadAt = b.CreatedAt
 		}
-		db.Bookmarks = append(db.Bookmarks, b)
-		return nil
+		return saveBookmark(tx, b)
 	})
 	return b, err
 }
 
 func (l Library) Get(id int64) (Bookmark, error) {
-	db, err := l.Store.read()
+	db, err := l.Store.open(false)
+	if errors.Is(err, os.ErrNotExist) {
+		return Bookmark{}, fmt.Errorf("%w: %d", ErrNotFound, id)
+	}
 	if err != nil {
 		return Bookmark{}, err
 	}
-	for _, b := range db.Bookmarks {
-		if b.ID == id {
-			return b, nil
-		}
+	defer db.Close()
+	b, err := scanBookmark(db.QueryRow("SELECT payload FROM bookmarks WHERE id=?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Bookmark{}, fmt.Errorf("%w: %d", ErrNotFound, id)
 	}
-	return Bookmark{}, fmt.Errorf("%w: %d", ErrNotFound, id)
+	return b, err
 }
 
 // Refresh fetches a new source snapshot without changing personal fields.
@@ -127,23 +136,13 @@ func (l Library) Refresh(ctx context.Context, id int64, fetcher MetadataFetcher)
 	if err != nil {
 		return Bookmark{}, err
 	}
-	var result Bookmark
-	err = l.Store.change(func(db *database) error {
+	return l.Store.mutate(id, func(current *Bookmark) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		for i, current := range db.Bookmarks {
-			if current.ID != id {
-				continue
-			}
-			current.Metadata = &m
-			current.UpdatedAt = time.Now().UTC()
-			db.Bookmarks[i], result = current, current
-			return nil
-		}
-		return fmt.Errorf("%w: %d", ErrNotFound, id)
+		current.Metadata = &m
+		return nil
 	})
-	return result, err
 }
 
 // Patch uses pointers so an omitted field differs from an explicit empty value.
@@ -163,81 +162,90 @@ type Patch struct {
 }
 
 func (l Library) Update(id int64, p Patch) (Bookmark, error) {
-	var result Bookmark
-	err := l.Store.change(func(db *database) error {
-		for i, b := range db.Bookmarks {
-			if b.ID != id {
-				continue
+	return l.Store.mutate(id, func(b *Bookmark) error {
+		if p.Title != nil {
+			b.Title = strings.TrimSpace(*p.Title)
+		}
+		if p.Author != nil {
+			b.Author = strings.TrimSpace(*p.Author)
+		}
+		if p.Status != nil {
+			b.Status = *p.Status
+		}
+		if p.Chapter != nil {
+			b.Chapter = *p.Chapter
+			if b.Chapter > 0 {
+				b.LastReadAt = time.Now().UTC()
+			} else {
+				b.LastReadAt = time.Time{}
 			}
-			if p.Title != nil {
-				b.Title = strings.TrimSpace(*p.Title)
+		}
+		if p.Tags != nil {
+			b.Tags = model.CleanTags(*p.Tags)
+		}
+		if p.Notes != nil {
+			b.Notes = *p.Notes
+		}
+		if p.Rating != nil {
+			b.Rating = *p.Rating
+		}
+		if p.ReviewNotes != nil {
+			b.ReviewNotes = *p.ReviewNotes
+		}
+		if p.LastReadAt != nil {
+			b.LastReadAt = p.LastReadAt.UTC()
+		}
+		if p.CreatedAt != nil {
+			if p.CreatedAt.IsZero() {
+				return errors.New("added date cannot be empty")
 			}
-			if p.Author != nil {
-				b.Author = strings.TrimSpace(*p.Author)
-			}
-			if p.Status != nil {
-				b.Status = *p.Status
-			}
-			if p.Chapter != nil {
-				b.Chapter = *p.Chapter
-				if b.Chapter > 0 {
-					b.LastReadAt = time.Now().UTC()
-				} else {
-					b.LastReadAt = time.Time{}
-				}
-			}
-			if p.Tags != nil {
-				b.Tags = model.CleanTags(*p.Tags)
-			}
-			if p.Notes != nil {
-				b.Notes = *p.Notes
-			}
-			if p.Rating != nil {
-				b.Rating = *p.Rating
-			}
-			if p.ReviewNotes != nil {
-				b.ReviewNotes = *p.ReviewNotes
-			}
-			if p.LastReadAt != nil {
-				b.LastReadAt = p.LastReadAt.UTC()
-			}
-			if p.CreatedAt != nil {
-				if p.CreatedAt.IsZero() {
-					return errors.New("added date cannot be empty")
-				}
-				b.CreatedAt = p.CreatedAt.UTC()
-			}
-			if p.ResetOverrides != nil {
-				if err := resetOverrides(&b, *p.ResetOverrides); err != nil {
-					return err
-				}
-			}
-			if p.Overrides != nil {
-				if b.Overrides == nil {
-					b.Overrides = &model.MetadataPatch{}
-				}
-				b.Overrides.Merge(*p.Overrides)
-			}
-			if err := model.Validate(b); err != nil {
+			b.CreatedAt = p.CreatedAt.UTC()
+		}
+		if p.ResetOverrides != nil {
+			if err := resetOverrides(b, *p.ResetOverrides); err != nil {
 				return err
 			}
-			b.UpdatedAt = time.Now().UTC()
-			db.Bookmarks[i], result = b, b
-			return nil
 		}
-		return fmt.Errorf("%w: %d", ErrNotFound, id)
+		if p.Overrides != nil {
+			if b.Overrides == nil {
+				b.Overrides = &model.MetadataPatch{}
+			}
+			b.Overrides.Merge(*p.Overrides)
+		}
+		return nil
 	})
-	return result, err
 }
 
 func (l Library) Delete(id int64) error {
-	return l.Store.change(func(db *database) error {
-		for i, b := range db.Bookmarks {
-			if b.ID == id {
-				db.Bookmarks = append(db.Bookmarks[:i], db.Bookmarks[i+1:]...)
-				return nil
-			}
+	return l.Store.write(func(tx *sql.Tx) error {
+		result, err := tx.Exec("DELETE FROM bookmarks WHERE id=?", id)
+		if err != nil {
+			return err
 		}
-		return fmt.Errorf("%w: %d", ErrNotFound, id)
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("%w: %d", ErrNotFound, id)
+		}
+		return nil
 	})
+}
+
+func (s Store) findURL(url string) (int64, error) {
+	db, err := s.open(false)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	var id int64
+	err = db.QueryRow("SELECT id FROM bookmarks WHERE url=?", url).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
 }

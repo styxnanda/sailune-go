@@ -22,6 +22,8 @@ type (
 	Progress        = model.Progress
 	Library         = library.Library
 	Store           = library.Store
+	Transfer        = library.Transfer
+	ImportResult    = library.ImportResult
 	Filter          = library.Filter
 	Patch           = library.Patch
 	MetadataFetcher = library.MetadataFetcher
@@ -59,3 +61,5 @@ func OpenLoginBrowser(ctx context.Context, site Site) error  { return auth.OpenL
 
 // DefaultSessionDir returns the local session directory, independent of bookmarks.
 func DefaultSessionDir() (string, error) { return auth.DefaultSessionDir() }
+
+func DefaultLibraryPath() (string, error) { return library.DefaultLibraryPath() }

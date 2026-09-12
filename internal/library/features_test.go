@@ -106,7 +106,8 @@ func TestLastReadSemanticsAndOldLibrary(t *testing.T) {
 		t.Fatal(b, err)
 	}
 	old := `{"version":1,"next_id":2,"bookmarks":[{"id":1,"url":"https://archiveofourown.org/works/1","site":"ao3","work_id":"1","status":"planned","chapter":0,"tags":[]}]}`
-	if err := os.WriteFile(l.Store.Path, []byte(old), 0600); err != nil {
+	l = testLibrary(t)
+	if _, err := l.Import(strings.NewReader(old), false); err != nil {
 		t.Fatal(err)
 	}
 	b, err = l.Get(1)

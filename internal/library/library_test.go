@@ -93,19 +93,7 @@ func TestFailedMutationPreservesFile(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatal("failed mutation modified library")
 	}
-	if err := os.WriteFile(l.Store.Path+".lock", nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := l.Delete(1); err == nil {
-		t.Fatal("ignored existing writer lock")
-	}
-	if _, err := l.Get(1); err != nil {
-		t.Fatalf("lock blocked reader: %v", err)
-	}
-	after, _ = os.ReadFile(l.Store.Path)
-	if string(before) != string(after) {
-		t.Fatal("locked mutation modified library")
-	}
+
 }
 
 func TestCorruptStoreIsNotOverwritten(t *testing.T) {

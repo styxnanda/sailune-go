@@ -32,6 +32,9 @@ Commands:
   update ID     Change personal metadata or progress
   refresh ID    Fetch the latest source metadata for a saved bookmark
   delete ID     Permanently remove one bookmark
+  export FILE   Export a portable JSON snapshot (use - for stdout)
+  import FILE   Restore JSON into a pristine library; --merge skips duplicates
+  migrate FILE  Migrate a legacy JSON library; original remains unchanged
   auth SITE     Import, inspect, or clear an AO3/FFN browser session
 
 Session setup (optional):
@@ -80,7 +83,8 @@ All commands accept --json. Options can precede or follow URL/ID.
 Use COMMAND --help for command options. Updates replace supplied fields;
 use an empty string to clear title, author, tags, or notes.
 
-Storage: --data PATH > SAILUNE_DATA > ~/.sailune/bookmarks.json
+Storage: --data PATH > SAILUNE_DATA > OS-local Sailune/library.sqlite3
+Keep SQLite local. Transfer closed JSON exports through cloud storage.
 Sessions: --sessions DIR > SAILUNE_SESSIONS > OS-local Sailune session directory
 Fetch failures do not save a bookmark; use --no-fetch for an offline entry.
 `
@@ -100,7 +104,7 @@ func run(ctx context.Context, args []string, out, errOut io.Writer, fetcher sail
 func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fetcher sailune.MetadataFetcher, loginDeps loginDependencies) error {
 	root := flag.NewFlagSet("sailune", flag.ContinueOnError)
 	root.SetOutput(errOut)
-	path := root.String("data", "", "library JSON path")
+	path := root.String("data", "", "local SQLite library path")
 	sessions := root.String("sessions", "", "private session directory")
 	root.Usage = func() { fmt.Fprint(out, help) }
 	if err := root.Parse(args); err != nil {
@@ -116,7 +120,7 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	}
 	command := args[0]
 	switch command {
-	case "add", "list", "show", "update", "refresh", "delete", "auth", "open", "resume":
+	case "add", "list", "show", "update", "refresh", "delete", "auth", "open", "resume", "export", "import", "migrate":
 	default:
 		return fmt.Errorf("unknown command %q; run sailune --help", command)
 	}
@@ -125,6 +129,10 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	jsonOutput := fs.Bool("json", false, "output JSON for scripts and future GUI clients")
 	var title, author, status, tags, notes, query, site, tag string
 	var chapter int
+	var merge bool
+	if command == "import" {
+		fs.BoolVar(&merge, "merge", false, "merge new URLs; skip existing URLs without overwriting personal data")
+	}
 	var customization customizationOptions
 	var listing listOptions
 	var next, printURL bool
@@ -180,6 +188,9 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		if command == "list" {
 			operand = ""
 		}
+		if command == "export" || command == "import" || command == "migrate" {
+			operand = " FILE"
+		}
 		if command == "auth" {
 			operand = " SITE"
 		}
@@ -219,11 +230,21 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		*path = os.Getenv("SAILUNE_DATA")
 	}
 	if *path == "" {
-		home, err := os.UserHomeDir()
+		var err error
+		*path, err = sailune.DefaultLibraryPath()
 		if err != nil {
 			return err
 		}
-		*path = filepath.Join(home, ".sailune", "bookmarks.json")
+		if command != "auth" && command != "migrate" && command != "import" {
+			if _, err := os.Stat(*path); errors.Is(err, os.ErrNotExist) {
+				if home, e := os.UserHomeDir(); e == nil {
+					old := filepath.Join(home, ".sailune", "bookmarks.json")
+					if _, e := os.Stat(old); e == nil {
+						return fmt.Errorf("legacy JSON library found; run sailune migrate %q (original kept unchanged)", old)
+					}
+				}
+			}
+		}
 	}
 	lib := sailune.Library{Store: sailune.Store{Path: *path}}
 	defaultSessions := *sessions == "" && os.Getenv("SAILUNE_SESSIONS") == ""
@@ -262,6 +283,18 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	var result any
 	var err error
 	switch command {
+	case "export":
+		if fs.Arg(0) == "-" {
+			return lib.Export(out)
+		}
+		if err := lib.ExportFile(fs.Arg(0)); err != nil {
+			return err
+		}
+		result = struct {
+			ExportedTo string `json:"exported_to"`
+		}{fs.Arg(0)}
+	case "import", "migrate":
+		result, err = lib.ImportFile(fs.Arg(0), merge)
 	case "auth":
 		if migrateFrom != "" && (login || cookies != "" || browserCookies != "" || clearSession) {
 			return errors.New("--migrate-from cannot be combined with login, import, or clear options")
@@ -413,6 +446,12 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		return encoder.Encode(result)
 	}
 	switch value := result.(type) {
+	case sailune.ImportResult:
+		_, err = fmt.Fprintf(out, "Imported %d bookmark(s); skipped %d existing URL(s). Source file left unchanged.\n", value.Imported, value.Skipped)
+	case struct {
+		ExportedTo string `json:"exported_to"`
+	}:
+		_, err = fmt.Fprintf(out, "Exported library to %s\n", safe(value.ExportedTo))
 	case openResult:
 		_, err = fmt.Fprintln(out, value.URL)
 	case sailune.SessionStatus:

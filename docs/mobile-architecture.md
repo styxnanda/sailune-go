@@ -45,7 +45,7 @@ The mobile app should invoke its platform URL-opening API on the returned URL.
   system-browser login automatically shares cookies with the app's HTTP client.
   AO3/FFN support and browser challenges need separate validation.
 - Decide on synchronization, conflict handling, and background refresh within
-  mobile lifecycle limits. Desktop JSON file sharing is not a mobile sync protocol.
+  mobile lifecycle limits. JSON snapshot export/import transfers libraries but is not a mobile sync protocol.
 
 Today's changes do not alter login or implement a mobile runtime, server, sync,
 or mobile browser/session handling.

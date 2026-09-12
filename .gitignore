@@ -8,3 +8,9 @@ cookies*.txt
 *.cookies.txt
 /sessions/
 /notes.md
+
+# Local SQLite libraries and journals
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm

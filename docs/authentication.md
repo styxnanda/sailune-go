@@ -269,8 +269,9 @@ Default locations are independent of the bookmark file:
 
 Override with `--sessions DIR` or `SAILUNE_SESSIONS`, in that order. Keep this
 directory local; Sailune cannot reliably detect every cloud-sync client or
-network mount. `--data` can point to a synced bookmark file without moving
-sessions. Bookmark files and exports contain no cookies or encryption keys.
+network mount. Keep the SQLite library selected by `--data` local as well;
+transfer closed JSON snapshots with `export` and `import`. Bookmark files and
+exports contain no cookies or encryption keys.
 Copying the session file alone to another device will not transfer its key;
 authenticate separately on each device. Full OS backups, credential-store
 exports, and software running as your OS account require their own protection.

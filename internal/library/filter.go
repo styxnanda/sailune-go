@@ -1,9 +1,8 @@
 package library
 
 import (
-	"cmp"
 	"errors"
-	"sort"
+	"os"
 	"strings"
 )
 
@@ -25,18 +24,6 @@ type Filter struct {
 	Desc      bool
 	Limit     int // zero means unlimited
 	Offset    int
-}
-
-func contains(value, query string) bool {
-	return strings.Contains(strings.ToLower(value), strings.ToLower(query))
-}
-func has(values []string, value string) bool {
-	for _, v := range values {
-		if strings.EqualFold(v, value) {
-			return true
-		}
-	}
-	return false
 }
 
 // List searches effective metadata and personal fields; all filters combine with AND.
@@ -62,86 +49,77 @@ func (l Library) List(f Filter) ([]Bookmark, error) {
 	default:
 		return nil, errors.New("sort must be added, last-read, updated, source-updated, title, author, rating, words, or progress")
 	}
-	db, err := l.Store.read()
+	db, err := l.Store.open(false)
+	if errors.Is(err, os.ErrNotExist) {
+		return []Bookmark{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
+	defer db.Close()
+	clauses := []string{"1=1"}
+	args := []any{}
+	add := func(clause string, values ...any) { clauses = append(clauses, clause); args = append(args, values...) }
+	if f.Site != "" {
+		add("site=?", f.Site)
+	}
+	if f.Status != "" {
+		add("status=?", f.Status)
+	}
+	if f.Language != "" {
+		add("language=?", fold(f.Language))
+	}
+	if f.Author != "" {
+		add("instr(author_search,?)>0", strings.ToLower(f.Author))
+	}
+	for kind, value := range map[string]string{"tag": f.Tag, "source-tag": f.SourceTag, "fandom": f.Fandom} {
+		if value != "" {
+			add("id IN (SELECT bookmark_id FROM facets WHERE kind=? AND value=?)", kind, fold(value))
+		}
+	}
+	if f.Complete != nil {
+		add("complete=?", *f.Complete)
+	}
+	if f.Unread {
+		add("unread>0")
+	}
+	if f.MinRating > 0 {
+		add("rating>=?", f.MinRating)
+	}
+	if f.MinWords > 0 {
+		add("words>=?", f.MinWords)
+	}
+	if f.MaxWords > 0 {
+		add("words<=?", f.MaxWords)
+	}
+	for _, term := range strings.Fields(f.Query) {
+		add("instr(search_text,?)>0", strings.ToLower(term))
+	}
+	columns := map[string]string{"": "added", "added": "added", "last-read": "last_read", "updated": "updated", "source-updated": "source_updated", "title": "title", "author": "author", "rating": "rating", "words": "words", "progress": "progress"}
+	direction := "ASC"
+	if f.Desc {
+		direction = "DESC"
+	}
+	query := "SELECT payload FROM bookmarks WHERE " + strings.Join(clauses, " AND ") + " ORDER BY " + columns[f.Sort] + " " + direction + ",id ASC LIMIT ? OFFSET ?"
+	limit := f.Limit
+	if limit == 0 {
+		limit = -1
+	}
+	args = append(args, limit, f.Offset)
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	result := []Bookmark{}
-	for _, b := range db.Bookmarks {
-		m := b.EffectiveMetadata()
-		if f.Site != "" && b.Site != f.Site || f.Status != "" && b.Status != f.Status {
-			continue
+	for rows.Next() {
+		b, err := scanBookmark(rows)
+		if err != nil {
+			return nil, err
 		}
-		if f.Tag != "" && !has(b.Tags, f.Tag) || f.SourceTag != "" && !has(m.Tags, f.SourceTag) {
-			continue
-		}
-		if !contains(b.Author+"\n"+strings.Join(m.Authors, "\n"), f.Author) {
-			continue
-		}
-		if f.Fandom != "" && !has(m.Fandoms, f.Fandom) || f.Language != "" && !strings.EqualFold(m.Language, f.Language) {
-			continue
-		}
-		if f.Complete != nil && (b.Metadata == nil && (b.Overrides == nil || b.Overrides.Complete == nil) || m.Complete != *f.Complete) {
-			continue
-		}
-		if f.Unread && b.ReadingProgress().Unread == 0 || b.Rating < f.MinRating {
-			continue
-		}
-		if m.Words < f.MinWords || f.MaxWords > 0 && m.Words > f.MaxWords {
-			continue
-		}
-		haystack := strings.Join([]string{b.Title, b.Author, b.URL, b.Notes, b.ReviewNotes, strings.Join(b.Tags, " "), m.Title, strings.Join(m.Authors, " "), m.Summary, strings.Join(m.Fandoms, " "), strings.Join(m.Tags, " "), m.Language, m.Rating}, "\n")
-		matches := true
-		for _, term := range strings.Fields(f.Query) {
-			if !contains(haystack, term) {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			result = append(result, b)
-		}
+		result = append(result, b)
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		a, b := result[i], result[j]
-		am, bm := a.EffectiveMetadata(), b.EffectiveMetadata()
-		order := 0
-		switch f.Sort {
-		case "", "added":
-			order = a.CreatedAt.Compare(b.CreatedAt)
-		case "last-read":
-			order = a.LastReadAt.Compare(b.LastReadAt)
-		case "updated":
-			order = a.UpdatedAt.Compare(b.UpdatedAt)
-		case "source-updated":
-			order = cmp.Compare(am.Updated, bm.Updated)
-		case "title":
-			order = cmp.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
-		case "author":
-			order = cmp.Compare(strings.ToLower(a.Author), strings.ToLower(b.Author))
-		case "rating":
-			order = cmp.Compare(a.Rating, b.Rating)
-		case "words":
-			order = cmp.Compare(am.Words, bm.Words)
-		case "progress":
-			order = cmp.Compare(a.ReadingProgress().Percent, b.ReadingProgress().Percent)
-		}
-		if order == 0 {
-			return a.ID < b.ID
-		}
-		if f.Desc {
-			return order > 0
-		}
-		return order < 0
-	})
-	if f.Offset >= len(result) {
-		return []Bookmark{}, nil
-	}
-	result = result[f.Offset:]
-	if f.Limit > 0 && f.Limit < len(result) {
-		result = result[:f.Limit]
-	}
-	return result, nil
+	return result, rows.Err()
 }
 
 func resetOverrides(b *Bookmark, names string) error {
