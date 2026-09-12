@@ -18,6 +18,8 @@ type (
 	Status          = model.Status
 	Bookmark        = model.Bookmark
 	Metadata        = model.Metadata
+	MetadataPatch   = model.MetadataPatch
+	Progress        = model.Progress
 	Library         = library.Library
 	Store           = library.Store
 	Filter          = library.Filter

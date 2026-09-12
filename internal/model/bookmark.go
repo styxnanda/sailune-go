@@ -37,24 +37,29 @@ func (s Status) Valid() bool {
 
 // Bookmark separates personal reading progress from the site's work identity.
 type Bookmark struct {
-	ID        int64     `json:"id"`
-	URL       string    `json:"url"`
-	Site      Site      `json:"site"`
-	WorkID    string    `json:"work_id"`
-	Title     string    `json:"title"`
-	Author    string    `json:"author"`
-	Status    Status    `json:"status"`
-	Chapter   int       `json:"chapter"`
-	Tags      []string  `json:"tags"`
-	Notes     string    `json:"notes"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Metadata  *Metadata `json:"metadata,omitempty"`
+	ID          int64          `json:"id"`
+	URL         string         `json:"url"`
+	Site        Site           `json:"site"`
+	WorkID      string         `json:"work_id"`
+	Title       string         `json:"title"`
+	Author      string         `json:"author"`
+	Status      Status         `json:"status"`
+	Chapter     int            `json:"chapter"`
+	Tags        []string       `json:"tags"`
+	Notes       string         `json:"notes"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	Metadata    *Metadata      `json:"metadata,omitempty"`
+	Overrides   *MetadataPatch `json:"overrides,omitempty"`
+	LastReadAt  time.Time      `json:"last_read_at,omitempty"`
+	Rating      int            `json:"rating"`
+	ReviewNotes string         `json:"review_notes"`
 }
 
 // Metadata is a snapshot from the source site, separate from personal fields.
 // TotalChapters is zero when the author has not declared a planned total.
 type Metadata struct {
+	ChapterIDs    []string  `json:"chapter_ids,omitempty"` // AO3 chapter order, never inferred from numeric IDs.
 	Title         string    `json:"title"`
 	Authors       []string  `json:"authors"`
 	Summary       string    `json:"summary"`
@@ -119,6 +124,14 @@ func CleanTags(tags []string) []string {
 func Validate(b Bookmark) error {
 	if !b.Status.Valid() {
 		return fmt.Errorf("invalid status %q: use planned, reading, completed, hold, or dropped", b.Status)
+	}
+	if b.Rating < 0 || b.Rating > 5 {
+		return errors.New("rating must be 0 (unrated) or 1–5 stars")
+	}
+	if b.Overrides != nil {
+		if err := b.Overrides.Validate(); err != nil {
+			return err
+		}
 	}
 	if b.Chapter < 0 {
 		return errors.New("chapter must be zero or greater")

@@ -8,7 +8,7 @@ list, and tracks personal reading progress. Optional browser-cookie sessions
 allow requests using your logged-in account.
 
 Features include automatic titles, authors, summaries, fandoms, source tags,
-and story statistics; search and filters; personal tags and notes; and JSON
+and story statistics; search and filters; personal tags and notes; personal ratings and reviews; browser resume; and JSON
 output. Sailune stores metadata, not chapter text.
 
 ## Usage
@@ -71,6 +71,98 @@ Your display title, author, reading status, last chapter read, tags, and notes
 stay unchanged. The latest source title and authors are in the JSON `metadata`
 object. Offline bookmarks can also be refreshed. A failed fetch preserves the
 previous bookmark and metadata. `update` continues to edit personal fields only.
+
+### Open and resume reading
+
+```sh
+sailune open 1                  # Open the work in the default browser
+sailune resume 1                # Open the next unread chapter
+sailune open 1 --next           # Same as resume
+sailune open 1 --chapter 3      # Open a specific chapter, including rereads
+sailune resume 1 --print-url    # Resolve only; no browser launch
+```
+
+These commands work from saved data and never mark a chapter read or import
+cookies. The browser uses its own signed-in session. Desktop launching supports
+macOS, Windows, and Linux. `--json` still launches unless `--print-url` is supplied.
+
+FFN chapter destinations use chapter numbers. AO3 uses chapter IDs captured from
+the source chapter selector or entire-work chapter headings on add/refresh; refresh older bookmarks once to save
+the index. If the index is unavailable, Sailune asks you to refresh or open the
+work manually. It never guesses AO3 chapter IDs. If progress is already at or
+past the saved published count, resume reports that you are caught up; refresh
+for new chapters or use open to reread. Saved source counts/indexes can be stale.
+
+### Progress, dates, personal ratings, and customization
+
+```sh
+sailune update 1 --chapter 3 --status reading
+sailune update 1 --rating 5 --review-notes 'Excellent pacing and characterization'
+sailune update 1 --notes 'Remember to recommend this to a friend'
+sailune update 1 --last-read '2026-09-10T21:30:00+07:00' --added 2026-01-15
+sailune update 1 --summary 'My own summary' --fandoms 'Example Fandom'
+sailune update 1 --words 42000 --chapters 12 --total-chapters 20 --complete=false
+sailune update 1 --language English --content-rating Teen --source-tags 'Magic,AU'
+sailune update 1 --published 2025-12-01 --source-updated 2026-09-01
+sailune update 1 --reset-overrides summary,words
+sailune update 1 --rating 0 --review-notes ''
+```
+
+`list` and `show` display read/published progress, percent, unread chapters, date
+added, last read, and personal stars. Progress uses published chapters, not the
+planned total. Unknown counts show `N/?`; percentages cap at 100% without changing
+your saved progress. Personal reading status remains explicitly controlled and
+independent of publication completion.
+
+Recording a positive `--chapter` sets last read to now, including recording the
+same chapter again. `--chapter 0` clears last read. An explicit `--last-read`
+overrides that behavior, accepts RFC3339, YYYY-MM-DD (midnight UTC), `now`, or an
+empty string to clear. `--added` accepts the same nonempty date formats. Other
+edits, refreshes, and opening the browser leave last read unchanged. Older
+libraries remain readable and show an unknown last-read date until you record
+one. Human dates use the local timezone; JSON timestamps use UTC.
+
+Personal `--rating` is an integer from 1 to 5; 0 means unrated. `--review-notes`
+is independent of `--notes` and the source's `--content-rating`. All can be edited
+individually; empty text clears a field.
+
+Custom summary, fandoms, source tags, language, content rating, word/chapter
+counts, completion, and source dates are stored in `overrides`, separate from
+raw `metadata`. Display, progress, search, and filters use effective values.
+Refresh updates raw metadata and preserves every override. Empty text/list,
+zero counts, and `--complete=false` are explicit overrides. Reset named fields
+with `--reset-overrides`, or use `all` to follow the source again. Reset happens
+before overrides supplied in the same command. Titles/authors continue to use
+the existing individually editable display fields; refresh preserves them.
+
+Identity (ID, canonical URL, site, work ID), fetched chapter IDs, and automatic
+update/fetch timestamps are managed by Sailune, not user-editable metadata.
+Personal customization flags are available on `update`; use add then update
+for a fully manual bookmark.
+
+### Search, filter, and sort
+
+```sh
+sailune list --query 'magic friendship' --fandom 'Example Fandom'
+sailune list --status reading --unread --sort last-read --desc
+sailune list --complete --min-words 10000 --max-words 100000
+sailune list --author 'Writer' --language English --source-tag AU
+sailune list --min-rating 4 --sort rating --desc --limit 20 --offset 0
+```
+
+Search matches every whitespace-separated term, ignoring case, across display
+fields, notes, reviews, personal tags, and effective source metadata. Terms may
+match different fields. `--author` is a substring filter; fandom, language,
+source tag, and personal tag filters are exact, ignoring case. All filters
+combine with AND. `--complete=false` selects ongoing stories with known
+publication state, excluding manual entries without that information.
+`--unread` requires a known published count greater than your reading progress.
+
+Sort keys: `added` (default), `last-read`, `updated` (any bookmark edit or refresh),
+`source-updated`, `title`, `author`, `rating`, `words`, and `progress` (percent).
+Sorts ascend unless `--desc` is supplied; ties use ascending ID. Unknown dates,
+unrated stars, and unknown numeric values sort as empty/zero. `--limit 0` means
+unlimited; offset and limit apply after filtering and sorting.
 
 ### Authenticate to AO3 and FFN
 
@@ -143,7 +235,7 @@ Keep session files private. Browser challenges may still prevent fetching.
 | `--chapter` | Last chapter read; defaults to `0` |
 | `--tags` | Comma-separated personal tags; replaces the existing list on update |
 | `--notes` | Personal notes; an empty string clears them |
-| `--query` | Case-insensitive search across personal and source metadata |
+| `--query` | Case-insensitive search; every whitespace-separated term must occur in personal or effective source metadata |
 | `--site` | Filter a list by `ao3` or `ffn` |
 | `--tag` | Filter a list by an exact personal tag, ignoring case |
 | `--json` | Machine-readable output; supported by every command |
@@ -153,13 +245,16 @@ Keep session files private. Browser challenges may still prevent fetching.
 
 Reading status and chapter progress describe your reading, independently of the
 story's publication state. Source metadata is saved separately from personal
-tags and notes. Updates change only supplied personal fields and do not refresh
-source metadata. Tags are trimmed and deduplicated ignoring case. Filters combine
-with AND; lists use creation order. IDs remain stable and are never reused.
+tags and notes. Updates change only supplied fields and do not fetch source metadata.
+Custom metadata overrides remain separate from the fetched snapshot. Tags are trimmed and deduplicated ignoring case. Filters combine
+with AND; lists sort by date added ascending unless another sort is requested. IDs remain stable and are never reused.
 Deletion is immediate.
 
-JSON output is a bookmark for add/show/update, an array for list (including `[]`
+JSON output is a bookmark for add/show/update/refresh, an array for list (including `[]`
 for no matches), `{"deleted_id":2}` for delete, or session status for auth.
+Bookmark JSON also includes `effective_metadata` and computed `progress`; the library
+file stores only source/personal data, not these derived output fields.
+Open/resume JSON contains `id`, `url`, and `opened`; use `--print-url` to avoid launching.
 Errors go to stderr and return a nonzero exit status.
 
 Command options can precede or follow a URL/ID. Global `--data` and `--sessions`
@@ -203,6 +298,9 @@ Back up or restore the library by copying its file while no writer is running.
 `list --json` exports records rather than the storage envelope; it is not a
 restorable library backup. There is no import command. Keep session credentials
 separate from bookmark backups, even though session files are encrypted.
+
+See [the mobile architecture decision](docs/mobile-architecture.md) for the planned
+shared-library approach to a future mobile app.
 
 ## Contributing
 

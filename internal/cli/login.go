@@ -12,8 +12,9 @@ import (
 )
 
 type loginDependencies struct {
-	input io.Reader
-	open  func(context.Context, sailune.Site) error
+	openStory func(context.Context, string) error
+	input     io.Reader
+	open      func(context.Context, sailune.Site) error
 }
 
 var errLoginCanceled = errors.New("login canceled; no browser cookies were imported")

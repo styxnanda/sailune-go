@@ -4,6 +4,7 @@ import "github.com/styxnanda/sailune-go/internal/model"
 
 type Bookmark = model.Bookmark
 type Metadata = model.Metadata
+type MetadataPatch = model.MetadataPatch
 type Site = model.Site
 type Status = model.Status
 

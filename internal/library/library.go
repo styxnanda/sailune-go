@@ -88,57 +88,13 @@ func (l Library) Add(b Bookmark) (Bookmark, error) {
 		db.NextID++
 		b.CreatedAt = time.Now().UTC()
 		b.UpdatedAt = b.CreatedAt
+		if b.Chapter > 0 && b.LastReadAt.IsZero() {
+			b.LastReadAt = b.CreatedAt
+		}
 		db.Bookmarks = append(db.Bookmarks, b)
 		return nil
 	})
 	return b, err
-}
-
-type Filter struct {
-	Query  string
-	Site   Site
-	Status Status
-	Tag    string
-}
-
-// List returns matches in creation order. Query is case-insensitive substring search.
-func (l Library) List(f Filter) ([]Bookmark, error) {
-	if f.Site != "" && f.Site != AO3 && f.Site != FFN {
-		return nil, errors.New("site must be ao3 or ffn")
-	}
-	if f.Status != "" && !f.Status.Valid() {
-		return nil, errors.New("invalid status: use planned, reading, completed, hold, or dropped")
-	}
-	db, err := l.Store.read()
-	if err != nil {
-		return nil, err
-	}
-	result := []Bookmark{}
-	for _, b := range db.Bookmarks {
-		if f.Site != "" && b.Site != f.Site || f.Status != "" && b.Status != f.Status {
-			continue
-		}
-		if f.Tag != "" {
-			found := false
-			for _, tag := range b.Tags {
-				if strings.EqualFold(tag, f.Tag) {
-					found = true
-				}
-			}
-			if !found {
-				continue
-			}
-		}
-		haystack := strings.Join([]string{b.Title, b.Author, b.URL, b.Notes, strings.Join(b.Tags, " ")}, "\n")
-		if b.Metadata != nil {
-			haystack += "\n" + strings.Join([]string{b.Metadata.Title, strings.Join(b.Metadata.Authors, " "), b.Metadata.Summary, strings.Join(b.Metadata.Fandoms, " "), strings.Join(b.Metadata.Tags, " ")}, "\n")
-		}
-		if !strings.Contains(strings.ToLower(haystack), strings.ToLower(f.Query)) {
-			continue
-		}
-		result = append(result, b)
-	}
-	return result, nil
 }
 
 func (l Library) Get(id int64) (Bookmark, error) {
@@ -192,12 +148,18 @@ func (l Library) Refresh(ctx context.Context, id int64, fetcher MetadataFetcher)
 
 // Patch uses pointers so an omitted field differs from an explicit empty value.
 type Patch struct {
-	Title   *string
-	Author  *string
-	Status  *Status
-	Chapter *int
-	Tags    *[]string
-	Notes   *string
+	Title          *string
+	Author         *string
+	Status         *Status
+	Chapter        *int
+	Tags           *[]string
+	Notes          *string
+	Rating         *int
+	ReviewNotes    *string
+	LastReadAt     *time.Time
+	CreatedAt      *time.Time
+	Overrides      *model.MetadataPatch
+	ResetOverrides *string // comma-separated override names; "all" clears all
 }
 
 func (l Library) Update(id int64, p Patch) (Bookmark, error) {
@@ -218,12 +180,43 @@ func (l Library) Update(id int64, p Patch) (Bookmark, error) {
 			}
 			if p.Chapter != nil {
 				b.Chapter = *p.Chapter
+				if b.Chapter > 0 {
+					b.LastReadAt = time.Now().UTC()
+				} else {
+					b.LastReadAt = time.Time{}
+				}
 			}
 			if p.Tags != nil {
 				b.Tags = model.CleanTags(*p.Tags)
 			}
 			if p.Notes != nil {
 				b.Notes = *p.Notes
+			}
+			if p.Rating != nil {
+				b.Rating = *p.Rating
+			}
+			if p.ReviewNotes != nil {
+				b.ReviewNotes = *p.ReviewNotes
+			}
+			if p.LastReadAt != nil {
+				b.LastReadAt = p.LastReadAt.UTC()
+			}
+			if p.CreatedAt != nil {
+				if p.CreatedAt.IsZero() {
+					return errors.New("added date cannot be empty")
+				}
+				b.CreatedAt = p.CreatedAt.UTC()
+			}
+			if p.ResetOverrides != nil {
+				if err := resetOverrides(&b, *p.ResetOverrides); err != nil {
+					return err
+				}
+			}
+			if p.Overrides != nil {
+				if b.Overrides == nil {
+					b.Overrides = &model.MetadataPatch{}
+				}
+				b.Overrides.Merge(*p.Overrides)
 			}
 			if err := model.Validate(b); err != nil {
 				return err

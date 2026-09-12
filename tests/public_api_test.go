@@ -56,3 +56,24 @@ func TestPublicAPICompatibility(t *testing.T) {
 		t.Fatalf("login API: %s %v", u, err)
 	}
 }
+
+func TestPublicReadingAndCustomizationAPI(t *testing.T) {
+	l := sailune.Library{Store: sailune.Store{Path: filepath.Join(t.TempDir(), "library.json")}}
+	b, err := l.Add(sailune.Bookmark{URL: "https://fanfiction.net/s/1/1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rating, read, published, review := 4, 2, 5, "Review"
+	b, err = l.Update(b.ID, sailune.Patch{Rating: &rating, Chapter: &read, ReviewNotes: &review, Overrides: &sailune.MetadataPatch{Chapters: &published}})
+	if err != nil || b.ReadingProgress().Unread != 3 || b.EffectiveMetadata().Chapters != 5 {
+		t.Fatal(b, err)
+	}
+	u, err := l.ResumeURL(b.ID)
+	if err != nil || u != "https://www.fanfiction.net/s/1/3" {
+		t.Fatal(u, err)
+	}
+	items, err := l.List(sailune.Filter{MinRating: 4, Unread: true, Sort: "last-read", Desc: true})
+	if err != nil || len(items) != 1 {
+		t.Fatal(items, err)
+	}
+}

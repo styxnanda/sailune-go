@@ -94,9 +94,58 @@ func parseAO3(doc *html.Node, m Metadata) Metadata {
 			m.Tags = append(m.Tags, nodeText(n))
 		}
 	}
+	index := first(doc, func(n *html.Node) bool { return n.Data == "select" && attr(n, "id") == "selected_id" })
+	for _, option := range all(index, element("option")) {
+		id := attr(option, "value")
+		if !ao3ChapterID.MatchString(id) {
+			m.ChapterIDs = nil
+			break
+		}
+		m.ChapterIDs = append(m.ChapterIDs, id)
+	}
+	// Entire-work view has chapter headings instead of a selector. Inspect only
+	// direct chapter containers, never links embedded in story text.
+	if index == nil {
+		chapters := first(work, func(n *html.Node) bool { return attr(n, "id") == "chapters" })
+		if chapters != nil {
+			for n := chapters.FirstChild; n != nil; n = n.NextSibling {
+				if n.Type != html.ElementNode || !hasClass("chapter")(n) {
+					continue
+				}
+				expected := fmt.Sprintf("chapter-%d", len(m.ChapterIDs)+1)
+				if attr(n, "id") != expected || hasClass("draft")(n) {
+					m.ChapterIDs = nil
+					break
+				}
+				var preface *html.Node
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					if hasClass("preface")(c) {
+						preface = c
+						break
+					}
+				}
+				heading := first(preface, func(n *html.Node) bool { return n.Data == "h3" && hasClass("title")(n) })
+				link := first(heading, element("a"))
+				match := ao3ChapterPath.FindStringSubmatch(attr(link, "href"))
+				if match == nil {
+					m.ChapterIDs = nil
+					break
+				}
+				m.ChapterIDs = append(m.ChapterIDs, match[1])
+			}
+		}
+	}
+	// Partial indexes cannot safely map reading positions.
+	if len(m.ChapterIDs) != m.Chapters {
+		m.ChapterIDs = nil
+	}
 	m.Authors, m.Fandoms, m.Tags = model.CleanTags(m.Authors), model.CleanTags(m.Fandoms), model.CleanTags(m.Tags)
 	return m
 }
+
+var ao3ChapterPath = regexp.MustCompile(`^/works/[1-9][0-9]*/chapters/([1-9][0-9]*)$`)
+
+var ao3ChapterID = regexp.MustCompile(`^[1-9][0-9]*$`)
 
 var ffnCount = regexp.MustCompile(`(?:^| - )(Chapters|Words): ([0-9,]+)`)
 

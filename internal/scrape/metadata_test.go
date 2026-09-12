@@ -89,3 +89,45 @@ func TestFFNNestedWorkHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestAO3ChapterIndex(t *testing.T) {
+	data, err := os.ReadFile("testdata/ao3.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		options string
+		count   int
+	}{
+		{`<option value="900">1. First</option><option value="120">2. Second</option><option value="700">3. Third</option>`, 3},
+		{`<option value="900">1</option><option value="https://evil.test">2</option>`, 0},
+	} {
+		page := strings.Replace(string(data), "</body>", `<select id="selected_id">`+tc.options+`</select></body>`, 1)
+		m, err := ParseMetadata(AO3, strings.NewReader(page))
+		if err != nil || len(m.ChapterIDs) != tc.count {
+			t.Fatalf("%+v %v", m.ChapterIDs, err)
+		}
+		if tc.count > 0 && m.ChapterIDs[1] != "120" {
+			t.Fatal(m.ChapterIDs)
+		}
+	}
+}
+
+func TestAO3EntireWorkChapterIndex(t *testing.T) {
+	data, err := os.ReadFile("testdata/ao3.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chapters := `<div id="chapters"><div class="chapter" id="chapter-1"><div class="chapter preface"><h3 class="title"><a href="/works/1/chapters/900">Chapter 1</a></h3></div><div class="userstuff"><a href="/works/1/chapters/999">unrelated body link</a></div></div><div class="chapter" id="chapter-2"><div class="chapter preface"><h3 class="title"><a href="/works/1/chapters/120">Chapter 2</a></h3></div></div><div class="chapter" id="chapter-3"><div class="chapter preface"><h3 class="title"><a href="/works/1/chapters/700">Chapter 3</a></h3></div></div></div>`
+	start := strings.Index(string(data), `<div id="chapters">`)
+	page := string(data[:start]) + chapters + `</div></body></html>`
+	m, err := ParseMetadata(AO3, strings.NewReader(page))
+	if err != nil || len(m.ChapterIDs) != 3 || m.ChapterIDs[1] != "120" {
+		t.Fatal(m.ChapterIDs, err)
+	}
+	page = strings.Replace(page, `id="chapter-2"`, `id="chapter-4"`, 1)
+	m, err = ParseMetadata(AO3, strings.NewReader(page))
+	if err != nil || len(m.ChapterIDs) != 0 {
+		t.Fatal("partial index accepted", m.ChapterIDs, err)
+	}
+}

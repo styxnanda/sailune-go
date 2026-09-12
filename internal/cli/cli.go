@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	sailune "github.com/styxnanda/sailune-go"
+	"github.com/styxnanda/sailune-go/internal/platform"
 )
 
 const help = `Sailune — local fanfiction bookmarks
@@ -25,6 +26,8 @@ Usage: sailune [--data PATH] COMMAND [OPTIONS]
 Commands:
   add URL       Bookmark an AO3 or FanFiction.net work
   list          List or search bookmarks
+  open ID       Open a work in the default browser (--chapter N or --next)
+  resume ID     Open the next unread chapter in the default browser
   show ID       Show one bookmark
   update ID     Change personal metadata or progress
   refresh ID    Fetch the latest source metadata for a saved bookmark
@@ -56,8 +59,22 @@ Add/refresh fetch options:
   By default, add fetches title, authors, summary, tags, and story statistics.
   --title and --author override fetched values when nonempty.
 
+Update customization:
+  --rating 0..5 --review-notes TEXT --last-read DATE --added DATE
+  --summary TEXT --fandoms LIST --source-tags LIST --language TEXT
+  --content-rating TEXT --words N --chapters N --total-chapters N
+  --complete[=false] --published DATE --source-updated DATE
+  --reset-overrides FIELD,...|all
+  Custom metadata survives refresh. Dates: see update --help.
+
 List options:
   --query TEXT --site ao3|ffn --status STATUS --tag TAG
+  --author TEXT --fandom TEXT --language TEXT --source-tag TEXT
+  --complete[=false] --unread --min-rating N --min-words N --max-words N
+  --sort added|last-read|updated|source-updated|title|author|rating|words|progress
+  --desc --limit N --offset N
+
+Open/resume: --print-url resolves without launching; opening never marks read.
 
 All commands accept --json. Options can precede or follow URL/ID.
 Use COMMAND --help for command options. Updates replace supplied fields;
@@ -99,7 +116,7 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	}
 	command := args[0]
 	switch command {
-	case "add", "list", "show", "update", "refresh", "delete", "auth":
+	case "add", "list", "show", "update", "refresh", "delete", "auth", "open", "resume":
 	default:
 		return fmt.Errorf("unknown command %q; run sailune --help", command)
 	}
@@ -108,6 +125,22 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 	jsonOutput := fs.Bool("json", false, "output JSON for scripts and future GUI clients")
 	var title, author, status, tags, notes, query, site, tag string
 	var chapter int
+	var customization customizationOptions
+	var listing listOptions
+	var next, printURL bool
+	if command == "update" {
+		customization.register(fs)
+	}
+	if command == "list" {
+		listing.register(fs)
+	}
+	if command == "open" || command == "resume" {
+		fs.BoolVar(&printURL, "print-url", false, "print destination without launching the browser")
+		if command == "open" {
+			fs.BoolVar(&next, "next", false, "open the next unread chapter")
+			fs.IntVar(&chapter, "chapter", 0, "open a specific chapter (1-based)")
+		}
+	}
 	var noFetch, clearSession, login bool
 	var cookies, userAgent, browserCookies, migrateFrom string
 	if command == "auth" || command == "add" || command == "refresh" {
@@ -175,7 +208,7 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		}
 	}
 	var id int64
-	if command == "show" || command == "update" || command == "refresh" || command == "delete" {
+	if command == "show" || command == "update" || command == "refresh" || command == "delete" || command == "open" || command == "resume" {
 		var err error
 		id, err = strconv.ParseInt(fs.Arg(0), 10, 64)
 		if err != nil || id < 1 {
@@ -286,7 +319,46 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		}
 		result, err = lib.Refresh(ctx, id, fetcher)
 	case "list":
-		result, err = lib.List(sailune.Filter{Query: query, Site: sailune.Site(site), Status: sailune.Status(status), Tag: tag})
+		f := listing.filter
+		f.Query, f.Site, f.Status, f.Tag = query, sailune.Site(site), sailune.Status(status), tag
+		fs.Visit(func(flag *flag.Flag) {
+			if flag.Name == "complete" {
+				f.Complete = &listing.complete
+			}
+		})
+		result, err = lib.List(f)
+	case "open", "resume":
+		suppliedChapter := false
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "chapter" {
+				suppliedChapter = true
+			}
+		})
+		if next && suppliedChapter {
+			return errors.New("use either --next or --chapter")
+		}
+		if suppliedChapter && chapter < 1 {
+			return errors.New("chapter must be at least 1")
+		}
+		var destination string
+		if command == "resume" || next {
+			destination, err = lib.ResumeURL(id)
+		} else {
+			destination, err = lib.OpenURL(id, chapter)
+		}
+		if err != nil {
+			return err
+		}
+		if !printURL {
+			open := loginDeps.openStory
+			if open == nil {
+				open = platform.OpenBrowser
+			}
+			if err := open(ctx, destination); err != nil {
+				return err
+			}
+		}
+		result = openResult{ID: id, URL: destination, Opened: !printURL}
 	case "show":
 		result, err = lib.Get(id)
 	case "update":
@@ -309,6 +381,9 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 				p.Notes = &notes
 			}
 		})
+		if err := customization.patch(fs, &p); err != nil {
+			return err
+		}
 		if p == (sailune.Patch{}) {
 			return errors.New("update requires at least one metadata option")
 		}
@@ -323,11 +398,23 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		return err
 	}
 	if *jsonOutput {
+		switch v := result.(type) {
+		case sailune.Bookmark:
+			result = outputBookmark(v)
+		case []sailune.Bookmark:
+			items := make([]bookmarkOutput, 0, len(v))
+			for _, b := range v {
+				items = append(items, outputBookmark(b))
+			}
+			result = items
+		}
 		encoder := json.NewEncoder(out)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(result)
 	}
 	switch value := result.(type) {
+	case openResult:
+		_, err = fmt.Fprintln(out, value.URL)
 	case sailune.SessionStatus:
 		_, err = fmt.Fprintf(out, "Site: %s\nSession saved: %t\nUsable cookies for site root: %d\nLogin validity is checked when fetching a work.\n", value.Site, value.Configured, value.UsableCookies)
 	case []sailune.Bookmark:
@@ -336,16 +423,19 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 			return err
 		}
 		w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSITE\tSTATUS\tCHAPTER\tTITLE\tAUTHOR")
+		fmt.Fprintln(w, "ID\tSITE\tSTATUS\tPROGRESS\tRATING\tADDED\tLAST READ\tTITLE\tAUTHOR")
 		for _, b := range value {
-			fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%s\n", b.ID, b.Site, b.Status, b.Chapter, displayTitle(b), safe(b.Author))
+			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", b.ID, b.Site, b.Status, progressText(b), ratingText(b.Rating), dateText(b.CreatedAt), dateText(b.LastReadAt), displayTitle(b), safe(b.Author))
 		}
 		return w.Flush()
 	case sailune.Bookmark:
 		_, err = fmt.Fprintf(out, "ID: %d\nTitle: %s\nAuthor: %s\nURL: %s\nSite: %s\nStatus: %s\nChapter: %d\nTags: %s\nNotes: %s\n", value.ID, displayTitle(value), safe(value.Author), value.URL, value.Site, value.Status, value.Chapter, safe(strings.Join(value.Tags, ", ")), safe(value.Notes))
-		if err == nil && value.Metadata != nil {
-			m := value.Metadata
-			_, err = fmt.Fprintf(out, "Summary: %s\nFandoms: %s\nLanguage: %s\nRating: %s\nWords: %d\nPublished chapters: %d\nStory complete: %t\nSource tags: %s\n", safe(m.Summary), safe(strings.Join(m.Fandoms, ", ")), safe(m.Language), safe(m.Rating), m.Words, m.Chapters, m.Complete, safe(strings.Join(m.Tags, ", ")))
+		if err == nil {
+			_, err = fmt.Fprintf(out, "Progress: %s\nAdded: %s\nLast read: %s\nPersonal rating: %s\nReview notes: %s\n", progressText(value), dateText(value.CreatedAt), dateText(value.LastReadAt), ratingText(value.Rating), safe(value.ReviewNotes))
+		}
+		if err == nil && (value.Metadata != nil || value.Overrides != nil) {
+			m := value.EffectiveMetadata()
+			_, err = fmt.Fprintf(out, "Summary: %s\nFandoms: %s\nLanguage: %s\nContent rating: %s\nWords: %d\nPublished chapters: %d\nStory complete: %t\nSource tags: %s\nPlanned chapters: %d\nPublished: %s\nSource updated: %s\n", safe(m.Summary), safe(strings.Join(m.Fandoms, ", ")), safe(m.Language), safe(m.Rating), m.Words, m.Chapters, m.Complete, safe(strings.Join(m.Tags, ", ")), m.TotalChapters, safe(m.Published), safe(m.Updated))
 		}
 	default:
 		_, err = fmt.Fprintf(out, "Deleted bookmark %d.\n", id)
@@ -448,4 +538,10 @@ func legacySessionDir(dataPath, destination string, site sailune.Site) string {
 		}
 	}
 	return ""
+}
+
+type openResult struct {
+	ID     int64  `json:"id"`
+	URL    string `json:"url"`
+	Opened bool   `json:"opened"`
 }
