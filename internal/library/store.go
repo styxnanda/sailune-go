@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -53,6 +54,10 @@ CREATE INDEX bookmarks_progress ON bookmarks(progress,id);
 
 func sqliteConnect(path string) (*sql.DB, error) {
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	// SQLite requires file:///C:/...; file://C:/... treats the drive as a host.
+	if runtime.GOOS == "windows" {
+		u.Path = "/" + u.Path
+	}
 	q := url.Values{"mode": {"rw"}, "_pragma": {"busy_timeout(5000)", "foreign_keys(1)", "synchronous(FULL)", "secure_delete(ON)"}, "_txlock": {"immediate"}}
 	u.RawQuery = q.Encode()
 	db, err := sql.Open("sqlite", u.String())

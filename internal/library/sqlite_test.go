@@ -270,3 +270,21 @@ func TestSQLiteWriterContentionUsesBusyTimeout(t *testing.T) {
 		t.Fatal("writer failed to resume")
 	}
 }
+
+// This also exercises drive-letter URI handling on Windows runners.
+func TestSQLiteLibraryPathEscaping(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "library #100% 日本語.sqlite3")
+	lib := Library{Store: Store{Path: path}}
+	b, err := lib.Add(Bookmark{URL: "https://archiveofourown.org/works/934", Title: "Exact file path"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+	reopened := Library{Store: Store{Path: path}}
+	got, err := reopened.Get(b.ID)
+	if err != nil || got.Title != b.Title {
+		t.Fatalf("reopen: %+v, %v", got, err)
+	}
+}
