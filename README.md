@@ -1,5 +1,7 @@
 # Sailune
 
+<img src="docs/sailune-icon.png" alt="Sailune icon" width="128" />
+
 ## About
 
 Sailune is a fanfiction bookmarking CLI written in Go for Archive of Our Own
