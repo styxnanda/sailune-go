@@ -175,7 +175,7 @@ func TestBrowserProfileSelection(t *testing.T) {
 			t.Fatalf("accepted %s", value)
 		}
 	}
-	if got := browserRoots("brave", "darwin", "/home/test", "", "", "")[0]; !strings.HasSuffix(got, "BraveSoftware/Brave-Browser") {
+	if got := browserRoots("brave", "darwin", "/home/test", "", "", "")[0]; !strings.HasSuffix(filepath.ToSlash(got), "BraveSoftware/Brave-Browser") {
 		t.Fatal(got)
 	}
 }
