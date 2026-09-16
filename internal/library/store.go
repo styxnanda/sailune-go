@@ -164,7 +164,7 @@ func (s Store) initialize(path string) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err := os.Link(name, path); err != nil && !errors.Is(err, os.ErrExist) {
+	if err := publishDatabase(name, path); err != nil && !errors.Is(err, os.ErrExist) {
 		return err
 	}
 	return nil
