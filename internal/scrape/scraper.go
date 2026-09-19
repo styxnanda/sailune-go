@@ -22,7 +22,7 @@ var (
 
 // Scraper fetches a single work page with bounded I/O and optional sessions.
 // Client can supply a custom transport for a GUI or tests; redirects, cookie
-// scope, and timeout are still enforced. No automatic retries are performed.
+// scope, and timeout are still enforced. Temporary failures receive bounded retries.
 type Scraper struct {
 	Sessions  SessionStore
 	Client    *http.Client
@@ -43,8 +43,8 @@ func (s *Scraper) Fetch(ctx context.Context, raw string) (Metadata, error) {
 			client = *s.Client
 		}
 		client.Jar = jar
-		if client.Timeout <= 0 || client.Timeout > 30*time.Second {
-			client.Timeout = 30 * time.Second
+		if client.Timeout <= 0 || client.Timeout > 8*time.Second {
+			client.Timeout = 8 * time.Second
 		}
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
@@ -70,7 +70,7 @@ func (s *Scraper) Fetch(ctx context.Context, raw string) (Metadata, error) {
 		req.Header.Set("User-Agent", ua)
 		req.Header.Set("Accept", "text/html,application/xhtml+xml")
 		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-		resp, err := client.Do(req)
+		resp, err := doWithRetry(ctx, &client, req)
 		if err != nil {
 			// Do not echo redirect URLs: they can contain login tokens.
 			if ctx.Err() != nil {
@@ -94,7 +94,7 @@ func (s *Scraper) Fetch(ctx context.Context, raw string) (Metadata, error) {
 			return ErrRateLimited
 		}
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("site returned HTTP %d; try again later", resp.StatusCode)
+			return fmt.Errorf("site returned HTTP %d; the source may be unavailable; try again later or save without fetching", resp.StatusCode)
 		}
 		if strings.Contains(resp.Request.URL.Path, "login") {
 			return ErrLoginRequired

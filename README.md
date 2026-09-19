@@ -444,3 +444,29 @@ Sailune is an independent project and is not affiliated with AO3 or FanFiction.n
 ## License
 
 Licensed under the GNU General Public License, version 3. See [LICENSE](LICENSE).
+
+### Scraping reliability
+
+Temporary HTTP failures (408, 500, 502–504, 520–525), connection resets and
+network timeouts receive up to four attempts, with exponential backoff and
+jitter. Each attempt has an 8-second ceiling; all attempts share a 30-second
+budget or the caller's shorter deadline (Android uses 15 seconds). Cancellation
+interrupts backoff and network requests. `Retry-After` is honored, including HTTP
+dates; 429 without a usable retry deadline is returned immediately. A server
+wait that cannot fit within the remaining budget is returned without retrying.
+
+525 means Cloudflare's TLS handshake with the source server failed, not a local
+certificate that Sailune can repair. Persistent outages still fail. Challenges,
+login gates, missing works and invalid metadata are not blindly retried. No
+alternate domains, weakened TLS, or guessed metadata are used. Failed refreshes
+preserve existing metadata; an offline bookmark can be refreshed later.
+
+To measure real metadata success without touching your library or stored cookies:
+
+```sh
+go run scripts/check-scraping.go -timeout 15s URL [URL ...]
+```
+
+The probe requests stories sequentially, pauses between them, emits JSON lines
+without story content, and exits nonzero if any fetch fails. See
+[the investigation](docs/scraping-reliability.md) for measured results and limits.
