@@ -10,25 +10,31 @@ import (
 	"flag"
 	"fmt"
 	sailune "github.com/styxnanda/sailune-go"
+	"github.com/styxnanda/sailune-go/browser"
 	"os"
 	"time"
 )
 
 func main() {
 	timeout := flag.Duration("timeout", 30*time.Second, "total budget per story")
+	profile := flag.String("browser-profile", "", "optional app-owned background Chrome profile")
 	flag.Parse()
 	if flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: go run scripts/check-scraping.go [-timeout 15s] URL ...")
 		os.Exit(2)
 	}
 	success := 0
+	scraper := &sailune.Scraper{}
+	if *profile != "" {
+		scraper.Browser = &sailune.BrowserRecovery{Loader: &browser.Chromium{Profile: *profile}}
+	}
 	for i, u := range flag.Args() {
 		if i > 0 {
 			time.Sleep(time.Second)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 		start := time.Now()
-		m, err := (&sailune.Scraper{}).Fetch(ctx, u)
+		m, err := scraper.Fetch(ctx, u)
 		cancel()
 		row := struct {
 			URL          string `json:"url"`

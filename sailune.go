@@ -31,6 +31,8 @@ type (
 	SessionStatus   = auth.SessionStatus
 	BrowserSpec     = auth.BrowserSpec
 	Scraper         = scrape.Scraper
+	BrowserRecovery = scrape.BrowserRecovery
+	BrowserLoader   = scrape.BrowserLoader
 )
 
 const (

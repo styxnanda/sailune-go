@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/styxnanda/sailune-go/browser"
 	"io"
 	"os"
 	"path/filepath"
@@ -336,7 +337,7 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 			result, err = lib.Add(b)
 		} else {
 			if fetcher == nil {
-				fetcher = &sailune.Scraper{Sessions: sessionStore, UserAgent: userAgent}
+				fetcher = &sailune.Scraper{Sessions: sessionStore, UserAgent: userAgent, Browser: &sailune.BrowserRecovery{Loader: &browser.Chromium{Profile: filepath.Join(sessionStore.Dir, "ffn-browser")}}}
 			}
 			if browserCookies != "" {
 				fetcher = browserSessionFetcher{source: browserCookies, sessions: sessionStore, next: fetcher}
@@ -345,7 +346,7 @@ func runWithLogin(ctx context.Context, args []string, out, errOut io.Writer, fet
 		}
 	case "refresh":
 		if fetcher == nil {
-			fetcher = &sailune.Scraper{Sessions: sessionStore, UserAgent: userAgent}
+			fetcher = &sailune.Scraper{Sessions: sessionStore, UserAgent: userAgent, Browser: &sailune.BrowserRecovery{Loader: &browser.Chromium{Profile: filepath.Join(sessionStore.Dir, "ffn-browser")}}}
 		}
 		if browserCookies != "" {
 			fetcher = browserSessionFetcher{source: browserCookies, sessions: sessionStore, next: fetcher}

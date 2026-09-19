@@ -27,9 +27,10 @@ type Scraper struct {
 	Sessions  SessionStore
 	Client    *http.Client
 	UserAgent string
+	Browser   *BrowserRecovery
 }
 
-func (s *Scraper) Fetch(ctx context.Context, raw string) (Metadata, error) {
+func (s *Scraper) fetchHTTP(ctx context.Context, raw string) (Metadata, error) {
 	canonical, site, _, err := model.NormalizeURL(raw)
 	if err != nil {
 		return Metadata{}, err

@@ -56,3 +56,48 @@ origin-checked bridge. This requires separate desktop and Android integration,
 including session storage and lifecycle/security tests. It is not implemented
 or counted as a success in this change. Never auto-solve challenges, harvest
 unrelated browser cookies, or substitute cached/search snippets as current data.
+
+## Experimental silent-browser prototype
+
+FFN may now use an optional browser loader after a challenge, missing metadata,
+or the 5-second HTTP budget expires. The existing 30-second total bound remains
+for CLI/Desktop and 15 seconds for Android. The browser returns header HTML and
+its final URL; the core verifies HTTPS, FFN origin, the requested story identity,
+a 1 MiB payload cap, and valid metadata before any save. No challenge is clicked
+or solved automatically. Login requirements, 404 and 429 do not trigger fallback.
+
+Recovery is serialized and unsuccessful attempts receive a 60-second cooldown
+within the running client. Cancellation stops browser work and rejects late
+callbacks. User cancellation does not cause cooldown. CLI/Desktop launch an
+installed Chrome/Chromium headlessly on demand with a dedicated profile beneath
+the session directory, never a personal browser profile. They close the process
+after each attempt. If Chrome is absent, recovery fails quietly. Android supplies
+its own on-demand, unattached WebView with app-private cookies and no native
+JavaScript bridge; prompts/permissions are denied and it is destroyed when done.
+
+The first eight-link desktop run yielded 2/8 overall, with blocked browser
+attempts exhausting the deadline. A separate direct browser probe also timed
+out. Therefore the prototype has **not demonstrated improved FFN reliability**.
+This exploratory run preceded the correction to apply cooldown after browser
+timeouts, so sequential blocked attempts in the final version stop earlier.
+A real Chromium fixture test passed for JavaScript-rendered header extraction;
+that is integration evidence, not evidence of passing FFN's live challenges.
+
+Reproduce the optional headless path with an isolated profile:
+
+```sh
+go run scripts/check-scraping.go -timeout 15s \
+  -browser-profile /absolute/path/to/isolated-profile URL [URL ...]
+SAILUNE_BROWSER_TEST=1 go test ./browser
+```
+
+The Android emulator's direct WebView test also returned **0/8 metadata pages**:
+all eight attempts ended at approximately 15.02 seconds. This test exercised the
+browser adapter alone (not HTTP plus fallback) so it isolates the proposed
+recovery mechanism. The three deterministic Android instrumentation checks
+passed: JavaScript header extraction without an attached window, blocked-page
+timeout without a prompt, and cancellation destroying the WebView. The real
+network test passed its lifecycle/deadline assertions but did not meet the
+metadata success objective. A physical-device run could differ; no device
+success is assumed. These results do not justify claiming that an invisible
+browser solves FFN access restrictions.

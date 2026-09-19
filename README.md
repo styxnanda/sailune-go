@@ -470,3 +470,10 @@ go run scripts/check-scraping.go -timeout 15s URL [URL ...]
 The probe requests stories sequentially, pauses between them, emits JSON lines
 without story content, and exits nonzero if any fetch fails. See
 [the investigation](docs/scraping-reliability.md) for measured results and limits.
+
+The local silent FFN prototype also supports an on-demand headless browser
+fallback. CLI/Desktop require an installed Chrome/Chromium; its dedicated
+`ffn-browser` profile is stored under Sailune's session directory. It never opens
+a verification window. HTTP receives a 5-second budget before eligible browser
+recovery; both paths share the total timeout. Browser challenges can still fail.
+See the investigation above for measured results and local test commands.
