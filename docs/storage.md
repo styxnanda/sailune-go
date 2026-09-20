@@ -96,3 +96,22 @@ References:
 - [SQLite network caveats](https://www.sqlite.org/useovernet.html)
 - [SQLite backup snapshots](https://www.sqlite.org/backup.html)
 - [SQLite secure-delete pragma](https://www.sqlite.org/pragma.html#pragma_secure_delete)
+
+## v0.9.0 schema and archives
+
+Schema 2 adds stable-ID collections, indexed many-to-many memberships, saved
+rules, optimized JPEG BLOB assets, and per-story role/focal-point associations.
+Opening a schema-1 library migrates it in an immediate transaction; future schema
+versions are refused. Existing bookmark payloads and identifiers remain intact.
+Take a pre-upgrade backup if rollback to an older binary is required.
+
+Full backups use ZIP format version 2 with manifest/library JSON and content-hash
+image entries. Export reads one SQLite snapshot. Import validates paths, bounds,
+checksums, records, and images before its atomic write transaction; staged files
+are removed afterward. Existing story URLs are mapped to local IDs, manual
+memberships are unioned, and missing artwork roles are filled without overwriting
+existing roles. Stable collection IDs preserve repeated-import identity; a name
+collision on a distinct ID receives an imported suffix. Existing rules win.
+
+Legacy JSON APIs remain for compatibility and do not contain schema-2 additions.
+See release-v0.9.0.md for supported limits. No sync protocol is implemented.

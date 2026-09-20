@@ -125,9 +125,30 @@ func (s Store) open(create bool) (*sql.DB, error) {
 	if err = db.QueryRow("PRAGMA application_id").Scan(&app); err == nil {
 		err = db.QueryRow("PRAGMA user_version").Scan(&version)
 	}
-	if err != nil || app != 1396787532 || version != 1 {
+	if err != nil || app != 1396787532 || (version != 1 && version != 2) {
 		db.Close()
 		return nil, errors.New("invalid or unsupported Sailune SQLite schema (file left untouched)")
+	}
+	if version == 1 {
+		tx, e := db.Begin()
+		if e != nil {
+			db.Close()
+			return nil, e
+		}
+		var current int
+		e = tx.QueryRow("PRAGMA user_version").Scan(&current)
+		if e == nil && current == 1 {
+			_, e = tx.Exec(additions)
+		}
+		if e == nil {
+			e = tx.Commit()
+		} else {
+			tx.Rollback()
+		}
+		if e != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate library: %w", e)
+		}
 	}
 	return db, nil
 }

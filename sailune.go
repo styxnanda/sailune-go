@@ -13,7 +13,14 @@ import (
 	"github.com/styxnanda/sailune-go/internal/scrape"
 )
 
+const Version = "0.9.0"
+
 type (
+	OrganizeRequest = library.OrganizeRequest
+	Artwork         = library.Artwork
+	Collection      = library.Collection
+	CollectionRules = library.CollectionRules
+	TagRule         = library.TagRule
 	Site            = model.Site
 	Status          = model.Status
 	Bookmark        = model.Bookmark
@@ -65,3 +72,7 @@ func OpenLoginBrowser(ctx context.Context, site Site) error  { return auth.OpenL
 func DefaultSessionDir() (string, error) { return auth.DefaultSessionDir() }
 
 func DefaultLibraryPath() (string, error) { return library.DefaultLibraryPath() }
+
+func PreviewArtwork(r io.Reader, role string, x, y float64) ([]byte, error) {
+	return library.PreviewArtwork(r, role, x, y)
+}

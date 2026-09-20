@@ -7,23 +7,26 @@ import (
 )
 
 type Filter struct {
-	Query     string
-	Site      Site
-	Status    Status
-	Tag       string
-	Author    string
-	Fandom    string
-	Language  string
-	SourceTag string
-	Complete  *bool
-	Unread    bool
-	MinRating int
-	MinWords  int
-	MaxWords  int    // zero means no upper bound
-	Sort      string // added (default), last-read, updated, source-updated, title, author, rating, words, progress
-	Desc      bool
-	Limit     int // zero means unlimited
-	Offset    int
+	count      *int
+	Collection string
+	Rules      *CollectionRules
+	Query      string
+	Site       Site
+	Status     Status
+	Tag        string
+	Author     string
+	Fandom     string
+	Language   string
+	SourceTag  string
+	Complete   *bool
+	Unread     bool
+	MinRating  int
+	MinWords   int
+	MaxWords   int    // zero means no upper bound
+	Sort       string // added (default), last-read, updated, source-updated, title, author, rating, words, progress
+	Desc       bool
+	Limit      int // zero means unlimited
+	Offset     int
 }
 
 // List searches effective metadata and personal fields; all filters combine with AND.
@@ -60,6 +63,24 @@ func (l Library) List(f Filter) ([]Bookmark, error) {
 	clauses := []string{"1=1"}
 	args := []any{}
 	add := func(clause string, values ...any) { clauses = append(clauses, clause); args = append(args, values...) }
+	if f.Collection != "" {
+		c, e := readCollection(db, f.Collection)
+		if e != nil {
+			return nil, e
+		}
+		clause, values, e := collectionClause(c)
+		if e != nil {
+			return nil, e
+		}
+		add("("+clause+")", values...)
+	}
+	if f.Rules != nil {
+		clause, values, e := ruleClause(*f.Rules)
+		if e != nil {
+			return nil, e
+		}
+		add("("+clause+")", values...)
+	}
 	if f.Site != "" {
 		add("site=?", f.Site)
 	}
@@ -94,6 +115,10 @@ func (l Library) List(f Filter) ([]Bookmark, error) {
 	}
 	for _, term := range strings.Fields(f.Query) {
 		add("instr(search_text,?)>0", strings.ToLower(term))
+	}
+	if f.count != nil {
+		err := db.QueryRow("SELECT count(*) FROM bookmarks WHERE "+strings.Join(clauses, " AND "), args...).Scan(f.count)
+		return nil, err
 	}
 	columns := map[string]string{"": "added", "added": "added", "last-read": "last_read", "updated": "updated", "source-updated": "source_updated", "title": "title", "author": "author", "rating": "rating", "words": "words", "progress": "progress"}
 	direction := "ASC"
@@ -158,4 +183,11 @@ func resetOverrides(b *Bookmark, names string) error {
 		}
 	}
 	return nil
+}
+
+func (l Library) Count(f Filter) (int, error) {
+	n := 0
+	f.count = &n
+	_, err := l.List(f)
+	return n, err
 }

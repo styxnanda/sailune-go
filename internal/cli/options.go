@@ -117,6 +117,7 @@ type listOptions struct {
 
 func (o *listOptions) register(fs *flag.FlagSet) {
 	f := &o.filter
+	fs.StringVar(&f.Collection, "collection", "", "collection ID")
 	fs.StringVar(&f.Author, "author", "", "author contains text, ignoring case")
 	fs.StringVar(&f.Fandom, "fandom", "", "exact fandom, ignoring case")
 	fs.StringVar(&f.Language, "language", "", "exact language, ignoring case")

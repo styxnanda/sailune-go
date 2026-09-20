@@ -1,0 +1,58 @@
+name: Core checks and release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - run: go test -race ./...
+      - run: go vet ./...
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: Build standalone CLI archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(go run ./cmd/sailune --version)
+          test "v$VERSION" = "$GITHUB_REF_NAME"
+          mkdir -p packages
+          for TARGET in linux/amd64 linux/arm64 windows/amd64 darwin/arm64 darwin/amd64; do
+            TARGET_OS=${TARGET%/*}
+            TARGET_ARCH=${TARGET#*/}
+            NAME="sailune-cli-v${VERSION}-${TARGET_OS}-${TARGET_ARCH}"
+            mkdir -p "staging/$NAME"
+            EXE=sailune
+            if [ "$TARGET_OS" = windows ]; then EXE=sailune.exe; fi
+            GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" CGO_ENABLED=0 go build -trimpath -o "staging/$NAME/$EXE" ./cmd/sailune
+            cp LICENSE README.md "staging/$NAME/"
+            if [ "$TARGET_OS" = windows ]; then
+              (cd staging && zip -qr "../packages/$NAME.zip" "$NAME")
+            else
+              tar -czf "packages/$NAME.tar.gz" -C staging "$NAME"
+            fi
+          done
+          (cd packages && sha256sum *.zip *.tar.gz > SHA256SUMS)
+      - name: Publish v0.9 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" packages/* --verify-tag --title "Sailune CLI $GITHUB_REF_NAME" --notes-file docs/release-v0.9.0.md

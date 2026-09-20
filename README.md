@@ -477,3 +477,12 @@ fallback. CLI/Desktop require an installed Chrome/Chromium; its dedicated
 a verification window. HTTP receives a 5-second budget before eligible browser
 recovery; both paths share the total timeout. Browser challenges can still fail.
 See the investigation above for measured results and local test commands.
+
+## v0.9.0 — collections and artwork
+
+[Release and upgrade notes](docs/release-v0.9.0.md) describe the schema upgrade,
+portable ZIP backups, image limits, and CLI examples. Run `sailune --version` to
+check the installed version. `collection` manages manual/automatic collections;
+`art` manages portrait covers and horizontal backgrounds. `list --collection ID`
+filters before pagination. Prefer `export library.zip` for a complete backup;
+legacy `.json` exports omit collections and artwork.

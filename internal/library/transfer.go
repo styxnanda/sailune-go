@@ -26,8 +26,11 @@ type Transfer struct {
 }
 
 type ImportResult struct {
-	Imported int `json:"imported"`
-	Skipped  int `json:"skipped"`
+	Collections int `json:"collections,omitempty"`
+	Artwork     int `json:"artwork,omitempty"`
+	Conflicts   int `json:"conflicts,omitempty"`
+	Imported    int `json:"imported"`
+	Skipped     int `json:"skipped"`
 }
 
 func decodeTransfer(r io.Reader) (Transfer, error) {
@@ -77,7 +80,7 @@ func (l Library) Import(r io.Reader, merge bool) (ImportResult, error) {
 			return err
 		}
 		var count int
-		if err := tx.QueryRow("SELECT count(*) FROM bookmarks").Scan(&count); err != nil {
+		if err := tx.QueryRow("SELECT (SELECT count(*) FROM bookmarks)+(SELECT count(*) FROM collections)").Scan(&count); err != nil {
 			return err
 		}
 		if !merge && (count != 0 || next != 1) {

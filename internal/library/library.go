@@ -229,7 +229,7 @@ func (l Library) Delete(id int64) error {
 		if n == 0 {
 			return fmt.Errorf("%w: %d", ErrNotFound, id)
 		}
-		return nil
+		return cleanupArtwork(tx)
 	})
 }
 
